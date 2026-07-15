@@ -1,0 +1,1425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Constellation Finder</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="stars.js"></script>
+<script src="field.js"></script>
+<style>
+  :root{
+    --bg:#1b1c20; --panel:#26272c; --border:#3a3b41; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    background:var(--bg); color:var(--text); min-height:100vh;
+  }
+  header{ padding:20px 24px 8px; }
+  header h1{margin:0 0 4px; font-size:20px;}
+  header p{margin:0; color:var(--muted); font-size:13px;}
+  .layout{
+    display:grid; grid-template-columns:280px 1fr; gap:16px; padding:16px 24px 32px; align-items:start;
+  }
+  @media (max-width: 950px){ .layout{grid-template-columns:1fr;} }
+
+  .panel{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; }
+  .controls label{ display:block; font-size:12px; color:var(--muted); margin:14px 0 4px; }
+  .controls label:first-child{margin-top:0;}
+  .controls input[type=range]{width:100%; accent-color:var(--accent);}
+  .controls .val{font-size:11px; color:var(--text); min-width:34px; text-align:right;}
+  .btnrow{display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;}
+  button{
+    background:#33353c; color:var(--text); border:1px solid var(--border); border-radius:8px;
+    padding:8px 12px; font-size:13px; cursor:pointer;
+  }
+  button:hover{background:#3d3f47;}
+  button.primary{background:var(--accent); color:#0c1a2e; border-color:var(--accent); font-weight:600;}
+  button.primary:hover{filter:brightness(1.08);}
+  #fileInput{display:none;}
+
+  .stage{ display:grid; grid-template-columns:280px 1fr; gap:14px; align-items:start; }
+  @media (max-width: 950px){ .stage{grid-template-columns:1fr;} }
+  .card{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; text-align:center; }
+  .card h3{margin:0 0 8px; font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;}
+  .canvasWrap{
+    position:relative; background:repeating-conic-gradient(#2a2b30 0% 25%, #232428 0% 50%) 50% / 16px 16px;
+    border-radius:8px; overflow:hidden; min-height:180px; display:flex; align-items:center; justify-content:center;
+  }
+  .canvasWrap.drag{outline:2px dashed var(--accent); outline-offset:-2px;}
+  canvas, #chartHolder svg{max-width:100%; height:auto; display:block;}
+  .dropHint{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:6px; color:var(--muted); font-size:12px; pointer-events:none; padding:12px; text-align:center;}
+  .stats{margin-top:10px; font-size:11px; color:var(--muted); line-height:1.5; text-align:left;}
+  .stats b{color:var(--text);}
+  .candidateList{margin-top:8px; font-size:11px; color:var(--muted); text-align:left;}
+  .candidateList div{padding:2px 0; border-bottom:1px solid var(--border);}
+  .candidateList .best{color:var(--accent); font-weight:600;}
+  footer{padding:0 24px 24px; color:var(--muted); font-size:12px;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Point Pattern → Real Sky Constellation Finder</h1>
+  <p>Upload a diagram of dots (or a star pattern), detect the points and their relative brightness, and find the best-fitting real stars in the northern sky — kept in the same orientation the dots were drawn in.</p>
+</header>
+
+<div class="layout">
+  <div class="panel controls">
+    <div class="btnrow" style="margin-top:0;">
+      <button class="primary" id="uploadBtn">Upload image</button>
+      <button id="sampleBtn">Try sample pattern</button>
+    </div>
+    <input type="file" id="fileInput" accept="image/*">
+
+    <label>Light-intensity weight <span class="val" id="weightVal"></span></label>
+    <input type="range" id="weight" min="0" max="1.5" step="0.05" value="0.5">
+
+    <div>
+      <label class="row" style="align-items:center; gap:6px; margin-top:14px;">
+        <input type="checkbox" id="showNames" checked style="width:auto;">
+        <span style="font-size:12px; color:var(--text);">Show star names</span>
+      </label>
+    </div>
+
+    <label>Constellation opacity <span class="val" id="constOpacityVal"></span></label>
+    <input type="range" id="constOpacity" min="0" max="1" step="0.05" value="1">
+
+    <div class="btnrow">
+      <button id="downloadSvg">Download chart SVG</button>
+      <button id="downloadPng">Download chart PNG</button>
+    </div>
+    <div class="btnrow">
+      <button id="downloadJson">Download map file (.json)</button>
+    </div>
+    <div class="stats" id="pathStats"></div>
+    <div class="candidateList" id="candidateList"></div>
+  </div>
+
+  <div class="stage">
+    <div class="card">
+      <h3>Detected points</h3>
+      <div class="canvasWrap" id="dropZone">
+        <canvas id="srcCanvas"></canvas>
+        <div class="dropHint" id="dropHint">Drag &amp; drop an image here,<br>or use Upload / Try sample</div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Matching sky region</h3>
+      <div class="row" style="margin-bottom:8px; align-items:center; gap:8px;">
+        <span style="font-size:11px; color:var(--muted);">Zoom out</span>
+        <input type="range" id="skyZoom" min="0.3" max="4" step="0.1" value="1" style="flex:1; accent-color:var(--accent);">
+        <span style="font-size:11px; color:var(--muted);">Zoom in</span>
+        <span class="val" id="skyZoomVal" style="min-width:32px;">1.0×</span>
+      </div>
+      <div class="canvasWrap" id="chartHolder"></div>
+    </div>
+  </div>
+</div>
+
+<div class="layout" id="finderSection" style="display:none;">
+  <div class="panel controls">
+    <label>Observer location</label>
+    <div class="row">
+      <input type="number" id="obsLat" step="0.01" value="41.12" style="width:50%; background:#1f2024; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px;">
+      <input type="number" id="obsLon" step="0.01" value="16.87" style="width:50%; background:#1f2024; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px;">
+    </div>
+    <div style="font-size:10px; color:var(--muted); margin-top:2px;">lat°N, lon°E — default is Bari, Puglia</div>
+
+    <label>Or search by town/country name</label>
+    <div class="row">
+      <input type="text" id="obsPlace" placeholder="e.g. Ostuni, Italy" style="flex:1; background:#1f2024; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px;">
+      <button id="obsPlaceBtn">Find</button>
+    </div>
+    <div style="font-size:10px; color:var(--muted); margin-top:2px;" id="obsPlaceStatus">Needs internet access (map lookup only — your image stays local).</div>
+
+    <label>Date</label>
+    <input type="date" id="obsDate" style="width:100%; background:#1f2024; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px;">
+    <label>Time (local, Europe/Rome)</label>
+    <input type="time" id="obsTime" style="width:100%; background:#1f2024; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px;">
+
+    <div class="btnrow">
+      <button id="bestTimeBtn">Jump to best time tonight</button>
+    </div>
+    <div class="stats" id="visibilityStats"></div>
+  </div>
+
+  <div class="stage" style="grid-template-columns:1fr;">
+    <div class="card">
+      <h3>Where to look</h3>
+      <div class="row" style="margin-bottom:8px; align-items:center; gap:8px;">
+        <span style="font-size:11px; color:var(--muted);">Zoom out</span>
+        <input type="range" id="finderZoom" min="0.3" max="4" step="0.1" value="1" style="flex:1; accent-color:var(--accent);">
+        <span style="font-size:11px; color:var(--muted);">Zoom in</span>
+        <span class="val" id="finderZoomVal" style="min-width:32px;">1.0×</span>
+      </div>
+      <div class="canvasWrap" id="finderHolder"></div>
+    </div>
+  </div>
+</div>
+
+<footer>Image processing and star matching run locally in the browser — your photo never leaves it. Only the optional place-name search calls out (to OpenStreetMap) to resolve a town/country to coordinates. Best suited to clean dot/point diagrams — noisy real astrophotos may not segment cleanly.</footer>
+
+<script>
+(function(){
+  const srcCanvas = document.getElementById('srcCanvas');
+  const chartHolder = document.getElementById('chartHolder');
+  const dropZone = document.getElementById('dropZone');
+  const dropHint = document.getElementById('dropHint');
+  const fileInput = document.getElementById('fileInput');
+  const pathStats = document.getElementById('pathStats');
+  const candidateListEl = document.getElementById('candidateList');
+  const weightEl = document.getElementById('weight');
+  const weightValEl = document.getElementById('weightVal');
+
+  const MAX_DIM = 480;
+  const CHART_SIZE = 720;
+  let sourceLoaded = false;
+  let lastSvgString = '';
+  let lastChartSize = CHART_SIZE;
+  let lastMatchData = null;
+  let lastBestMatch = null;
+  let lastDrawingLayer = null;
+  let lastBgColor = null;
+  const FINDER_SIZE = 720;
+
+  // Picks a light-on-dark or dark-on-light palette so grid/field-star/text
+  // colors stay legible whatever the sampled background color turns out to be.
+  function paletteFor(bg){
+    const lum = bg ? (0.299*bg.r+0.587*bg.g+0.114*bg.b) : 20;
+    const dark = lum < 128;
+    return {
+      bgFill: bg ? `rgb(${bg.r},${bg.g},${bg.b})` : '#0b0f2b',
+      grid: dark ? '#3a4a7a' : '#93a0c8',
+      gridLabel: dark ? '#7f8bb8' : '#4a5580',
+      fieldStar: dark ? '#dfe8ff' : '#1c2440',
+      title: dark ? '#eef0f3' : '#14161a',
+      subtitle: dark ? '#9aa0ac' : '#4a4e58',
+      dimLabel: dark ? '#aaa' : '#666',
+      dimStar: dark ? '#999' : '#888',
+    };
+  }
+
+  function updateValLabels(){ weightValEl.textContent = parseFloat(weightEl.value).toFixed(2); }
+  updateValLabels();
+  weightEl.addEventListener('input', () => { updateValLabels(); scheduleProcess(); });
+  document.getElementById('constOpacityVal').textContent = parseFloat(document.getElementById('constOpacity').value).toFixed(2);
+
+  // Default the finder's date/time to "tonight" in the browser's real clock —
+  // 22:00 local (a reasonable stargazing hour), editable by the user afterward.
+  (function initObsDateTime(){
+    const now = new Date();
+    const y=now.getFullYear(), mo=String(now.getMonth()+1).padStart(2,'0'), d=String(now.getDate()).padStart(2,'0');
+    document.getElementById('obsDate').value = `${y}-${mo}-${d}`;
+    document.getElementById('obsTime').value = '22:00';
+  })();
+
+  // ---------- image loading ----------
+  function loadImageToCanvas(img){
+    let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    const scale = Math.min(1, MAX_DIM / Math.max(w,h));
+    w = Math.max(1, Math.round(w*scale));
+    h = Math.max(1, Math.round(h*scale));
+    srcCanvas.width = w; srcCanvas.height = h;
+    const c = srcCanvas.getContext('2d');
+    c.drawImage(img, 0, 0, w, h);
+    sourceLoaded = true;
+    dropHint.style.display = 'none';
+    scheduleProcess();
+  }
+
+  function loadFile(file){
+    if(!file || !file.type.startsWith('image/')) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => { loadImageToCanvas(img); URL.revokeObjectURL(url); };
+    img.src = url;
+  }
+
+  fileInput.addEventListener('change', e => loadFile(e.target.files[0]));
+  document.getElementById('uploadBtn').addEventListener('click', () => fileInput.click());
+
+  ['dragenter','dragover'].forEach(evt => dropZone.addEventListener(evt, e => {
+    e.preventDefault(); dropZone.classList.add('drag');
+  }));
+  ['dragleave','drop'].forEach(evt => dropZone.addEventListener(evt, e => {
+    e.preventDefault(); dropZone.classList.remove('drag');
+  }));
+  dropZone.addEventListener('drop', e => {
+    if(e.dataTransfer.files && e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+  });
+
+  document.getElementById('sampleBtn').addEventListener('click', () => {
+    const w = 300, h = 460;
+    srcCanvas.width = w; srcCanvas.height = h;
+    const c = srcCanvas.getContext('2d');
+    c.fillStyle = '#ffffff'; c.fillRect(0,0,w,h);
+    // a simple irregular scatter, sizes vary to encode "brightness"
+    const dots = [
+      {x:20, y:16, r:7}, {x:263, y:10, r:6.5},
+      {x:104, y:143, r:6}, {x:196, y:150, r:7},
+      {x:34, y:224, r:6}, {x:263, y:230, r:6.5},
+      {x:154, y:440, r:8},
+    ];
+    for(const d of dots){
+      c.beginPath(); c.arc(d.x, d.y, d.r, 0, Math.PI*2);
+      c.fillStyle = '#eec230'; c.fill();
+    }
+    sourceLoaded = true;
+    dropHint.style.display = 'none';
+    scheduleProcess();
+  });
+
+  // ---------- dot detection ----------
+  // Finds the background color as the single most common color across the
+  // WHOLE image (a grid sample, quantized into 8-level buckets to absorb
+  // compression noise) — not just the border. Border-only median sampling
+  // broke on photos where hair/subject reaches the edges: a per-channel
+  // median across a mixed black/white sample can land on a gray that never
+  // actually appears in the image. Mode across the full frame is robust to
+  // that since true background pixels vastly outnumber foreground ones overall.
+  function sampleBackgroundColor(imgData){
+    const {width:w, height:h, data} = imgData;
+    const counts = new Map();
+    const stepX = Math.max(1,(w/80)|0), stepY = Math.max(1,(h/80)|0);
+    for(let y=0;y<h;y+=stepY){
+      for(let x=0;x<w;x+=stepX){
+        const idx=(y*w+x)*4;
+        const r=data[idx]>>3<<3, g=data[idx+1]>>3<<3, b=data[idx+2]>>3<<3;
+        const key = r+'_'+g+'_'+b;
+        counts.set(key, (counts.get(key)||0)+1);
+      }
+    }
+    let bestKey=null, bestCount=-1;
+    for(const [key,count] of counts){ if(count>bestCount){ bestCount=count; bestKey=key; } }
+    const [r,g,b] = bestKey.split('_').map(Number);
+    return { r, g, b };
+  }
+
+  function rgbToHsv(r,g,b){
+    r/=255; g/=255; b/=255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b), d=max-min;
+    let h=0;
+    if(d!==0){
+      if(max===r) h = ((g-b)/d)%6;
+      else if(max===g) h = (b-r)/d+2;
+      else h = (r-g)/d+4;
+      h*=60; if(h<0) h+=360;
+    }
+    return { h, s: max===0?0:d/max, v: max };
+  }
+
+  // Orange/gold marker dots, not white line art, not the background — hue
+  // 15-55° with real saturation/brightness excludes white, black, and grayscale drawing.
+  function isOrangeColor(r,g,b){
+    const {h,s,v} = rgbToHsv(r,g,b);
+    return s>0.35 && v>0.25 && h>=15 && h<=55;
+  }
+
+  const NBR8=[[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]];
+
+  function connectedComponents(fg, w, h){
+    const labels = new Int32Array(w*h).fill(-1);
+    const blobs = [];
+    const stack=[];
+    for(let i=0;i<w*h;i++){
+      if(!fg[i]||labels[i]!==-1) continue;
+      const label=blobs.length;
+      labels[i]=label; stack.push(i);
+      let sumX=0,sumY=0,count=0;
+      while(stack.length){
+        const idx=stack.pop();
+        const x=idx%w, y=(idx/w)|0;
+        sumX+=x; sumY+=y; count++;
+        for(const [dx,dy] of NBR8){
+          const nx=x+dx, ny=y+dy;
+          if(nx<0||ny<0||nx>=w||ny>=h) continue;
+          const nidx=ny*w+nx;
+          if(fg[nidx]&&labels[nidx]===-1){ labels[nidx]=label; stack.push(nidx); }
+        }
+      }
+      blobs.push({ x:sumX/count, y:sumY/count, area:count });
+    }
+    return blobs;
+  }
+
+  // Finds the orange marker dots only — any other artwork (white/grayscale line
+  // drawing, background) is ignored here and handled separately as a backdrop layer.
+  function detectDots(imgData){
+    const w = imgData.width, h = imgData.height, data = imgData.data;
+    const fg = new Uint8Array(w*h);
+    for(let i=0,p=0;i<data.length;i+=4,p++){
+      fg[p] = isOrangeColor(data[i],data[i+1],data[i+2]) ? 1 : 0;
+    }
+    const blobs = connectedComponents(fg, w, h);
+    const maxArea = w*h*0.25;
+    const filtered = blobs.filter(b => b.area>=3 && b.area<=maxArea);
+    filtered.sort((a,b)=>b.area-a.area);
+    return filtered;
+  }
+
+  // Extracts everything that is NOT an orange dot and NOT background (i.e. the
+  // white/grayscale line drawing) into its own transparent-background layer, so
+  // it can be composited back into the final chart aligned with the real stars.
+  function extractDrawingLayer(imgData, bg){
+    const w = imgData.width, h = imgData.height, data = imgData.data;
+    const out = new ImageData(w, h);
+    let hasContent = false;
+    const BG_THRESH = 30;
+    for(let i=0;i<data.length;i+=4){
+      const r=data[i], g=data[i+1], b=data[i+2];
+      const dr=r-bg.r, dg=g-bg.g, db=b-bg.b;
+      const isBackground = Math.sqrt(dr*dr+dg*dg+db*db) <= BG_THRESH;
+      const isOrange = isOrangeColor(r,g,b);
+      if(!isBackground && !isOrange){
+        out.data[i]=r; out.data[i+1]=g; out.data[i+2]=b; out.data[i+3]=255;
+        hasContent = true;
+      }
+    }
+    return hasContent ? out : null;
+  }
+
+  function imageDataToDataURL(imgData){
+    const c = document.createElement('canvas');
+    c.width = imgData.width; c.height = imgData.height;
+    c.getContext('2d').putImageData(imgData, 0, 0);
+    return c.toDataURL('image/png');
+  }
+
+  function loadImage(src){
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
+
+  // Solves the 2D affine (a,b,c,d,e,f) that maps 3 source points onto 3
+  // destination points exactly, via Cramer's rule on the 3x3 linear system.
+  function affineFrom3Points(s0,s1,s2, d0,d1,d2){
+    const x1=s0.x,y1=s0.y, x2=s1.x,y2=s1.y, x3=s2.x,y3=s2.y;
+    const det = x1*(y2-y3) - y1*(x2-x3) + (x2*y3-x3*y2);
+    if(Math.abs(det) < 1e-9) return null;
+    function solve(u1,u2,u3){
+      const p = (u1*(y2-y3) - y1*(u2-u3) + (u2*y3-u3*y2)) / det;
+      const q = (x1*(u2-u3) - u1*(x2-x3) + (x2*u3-x3*u2)) / det;
+      const r = (x1*(y2*u3-y3*u2) - y1*(x2*u3-x3*u2) + u1*(x2*y3-x3*y2)) / det;
+      return { p, q, r };
+    }
+    const row1 = solve(d0.x,d1.x,d2.x), row2 = solve(d0.y,d1.y,d2.y);
+    return { a:row1.p, b:row2.p, c:row1.q, d:row2.q, e:row1.r, f:row2.r };
+  }
+
+  function drawWarpedTriangle(ctx, img, p0, p1, p2){
+    const aff = affineFrom3Points(
+      {x:p0.sx,y:p0.sy}, {x:p1.sx,y:p1.sy}, {x:p2.sx,y:p2.sy},
+      {x:p0.dx,y:p0.dy}, {x:p1.dx,y:p1.dy}, {x:p2.dx,y:p2.dy}
+    );
+    if(!aff) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(p0.dx,p0.dy); ctx.lineTo(p1.dx,p1.dy); ctx.lineTo(p2.dx,p2.dy);
+    ctx.closePath();
+    ctx.clip();
+    ctx.transform(aff.a, aff.b, aff.c, aff.d, aff.e, aff.f);
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
+  }
+
+  // Warps `img` onto a new (destW x destH) canvas via a piecewise-affine mesh:
+  // samples a gridN x gridN grid of source points, maps each through the
+  // (arbitrarily nonlinear) `mapFn`, and renders every small triangle with its
+  // own locally-fitted affine transform. A single affine matrix for the whole
+  // image is only accurate right at the point it was sampled from — real
+  // sky-to-screen mappings (gnomonic deprojection, and especially equatorial
+  // RA/Dec -> horizontal Alt/Az, whose "field rotation" varies across the sky)
+  // are genuinely curved, so anything far from that sample point drifts out of
+  // alignment. Splitting into many small triangles keeps each local patch
+  // small enough that its own affine approximation stays accurate.
+  function warpImageMesh(img, srcW, srcH, mapFn, destW, destH, gridN){
+    const canvas = document.createElement('canvas');
+    canvas.width = destW; canvas.height = destH;
+    const ctx = canvas.getContext('2d');
+    const pts = [];
+    for(let j=0;j<=gridN;j++){
+      const row = [];
+      for(let i=0;i<=gridN;i++){
+        const sx = srcW*i/gridN, sy = srcH*j/gridN;
+        const d = mapFn(sx, sy);
+        row.push({ sx, sy, dx:d.x, dy:d.y });
+      }
+      pts.push(row);
+    }
+    for(let j=0;j<gridN;j++){
+      for(let i=0;i<gridN;i++){
+        const p00=pts[j][i], p10=pts[j][i+1], p01=pts[j+1][i], p11=pts[j+1][i+1];
+        drawWarpedTriangle(ctx, img, p00, p10, p01);
+        drawWarpedTriangle(ctx, img, p10, p11, p01);
+      }
+    }
+    return canvas;
+  }
+
+  // ---------- minimum spanning tree (turns a point cloud into a stick figure) ----------
+  function buildMST(points){
+    const n = points.length;
+    if(n<2) return [];
+    const inTree = new Array(n).fill(false);
+    const dist = new Array(n).fill(Infinity);
+    const parent = new Array(n).fill(-1);
+    dist[0]=0;
+    const edges=[];
+    for(let iter=0; iter<n; iter++){
+      let u=-1, best=Infinity;
+      for(let i=0;i<n;i++) if(!inTree[i] && dist[i]<best){ best=dist[i]; u=i; }
+      if(u===-1) break;
+      inTree[u]=true;
+      if(parent[u]!==-1) edges.push([parent[u], u]);
+      for(let v=0; v<n; v++){
+        if(inTree[v]) continue;
+        const d = Math.hypot(points[u].x-points[v].x, points[u].y-points[v].y);
+        if(d<dist[v]){ dist[v]=d; parent[v]=u; }
+      }
+    }
+    return edges;
+  }
+
+  // ---------- sky-projection & similarity-transform matching ----------
+  function degToRad(d){ return d*Math.PI/180; }
+
+  function gnomonic(ra, dec, ra0, dec0){
+    const raR=degToRad(ra), decR=degToRad(dec), ra0R=degToRad(ra0), dec0R=degToRad(dec0);
+    const cosc = Math.sin(dec0R)*Math.sin(decR) + Math.cos(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R);
+    if(cosc<=0.01) return null;
+    return {
+      x: Math.cos(decR)*Math.sin(raR-ra0R)/cosc,
+      y: (Math.cos(dec0R)*Math.sin(decR) - Math.sin(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R))/cosc,
+    };
+  }
+
+  // Fits scale + translation ONLY — no rotation, no mirroring — so the matched
+  // stars (and anything else, like the source drawing, transformed the same
+  // way) keep the exact orientation and handedness the dots were drawn in.
+  // (sIm is kept at 0 so this still uses the same {sRe,sIm,tx,ty} shape as a
+  // full similarity transform — applyTransform/applyInverseTransform work unchanged.)
+  function fitScaleTranslate(A, B){
+    const n = A.length;
+    let Ax=0,Ay=0,Bx=0,By=0;
+    for(let i=0;i<n;i++){ Ax+=A[i].x; Ay+=A[i].y; Bx+=B[i].x; By+=B[i].y; }
+    Ax/=n; Ay/=n; Bx/=n; By/=n;
+    let num=0, den=0;
+    for(let i=0;i<n;i++){
+      const ax=A[i].x-Ax, ay=A[i].y-Ay, bx=B[i].x-Bx, by=B[i].y-By;
+      num += ax*bx + ay*by;
+      den += ax*ax + ay*ay;
+    }
+    if(den < 1e-12) return null;
+    const sRe = num/den;
+    const tx = Bx - sRe*Ax, ty = By - sRe*Ay;
+    let residual = 0, spread = 0;
+    for(let i=0;i<n;i++){
+      const px = sRe*A[i].x + tx, py = sRe*A[i].y + ty;
+      const dx = px-B[i].x, dy = py-B[i].y;
+      residual += dx*dx+dy*dy;
+      spread += (B[i].x-Bx)**2 + (B[i].y-By)**2;
+    }
+    return { sRe, sIm:0, tx, ty, residual: spread>1e-9 ? residual/spread : residual };
+  }
+
+  function applyTransform(pt, fit){
+    return { x: fit.sRe*pt.x - fit.sIm*pt.y + fit.tx, y: fit.sIm*pt.x + fit.sRe*pt.y + fit.ty };
+  }
+
+  // Inverse of applyTransform: fit maps gnomonic sky-space -> input pixel-space,
+  // so this maps a pixel-space point back to that gnomonic tangent plane.
+  function applyInverseTransform(pt, fit){
+    const dx = pt.x - fit.tx, dy = pt.y - fit.ty;
+    const denom = fit.sRe*fit.sRe + fit.sIm*fit.sIm || 1e-12;
+    return { x: (dx*fit.sRe + dy*fit.sIm)/denom, y: (dy*fit.sRe - dx*fit.sIm)/denom };
+  }
+
+  // Inverse gnomonic (deprojection): a tangent-plane point back to (ra,dec) degrees.
+  function inverseGnomonic(x, y, ra0, dec0){
+    const ra0R=degToRad(ra0), dec0R=degToRad(dec0);
+    const rho = Math.hypot(x,y);
+    if(rho < 1e-12) return { ra: ra0, dec: dec0 };
+    const c = Math.atan(rho);
+    const sinc = Math.sin(c), cosc = Math.cos(c);
+    const decR = Math.asin(cosc*Math.sin(dec0R) + (y*sinc*Math.cos(dec0R))/rho);
+    const raR = ra0R + Math.atan2(x*sinc, rho*Math.cos(dec0R)*cosc - y*Math.sin(dec0R)*sinc);
+    return { ra: raR*180/Math.PI, dec: decR*180/Math.PI };
+  }
+
+  function centerAndScale(pts){
+    let cx=0,cy=0; for(const p of pts){ cx+=p.x; cy+=p.y; } cx/=pts.length; cy/=pts.length;
+    let rms=0; for(const p of pts){ rms += (p.x-cx)**2+(p.y-cy)**2; } rms = Math.sqrt(rms/pts.length) || 1;
+    return pts.map(p => ({x:(p.x-cx)/rms, y:(p.y-cy)/rms}));
+  }
+
+  function greedyAssign(targetPts, srcPts){
+    if(srcPts.length < targetPts.length) return null;
+    const pairs = [];
+    for(let i=0;i<targetPts.length;i++){
+      for(let j=0;j<srcPts.length;j++){
+        const dx=targetPts[i].x-srcPts[j].x, dy=targetPts[i].y-srcPts[j].y;
+        pairs.push([dx*dx+dy*dy, i, j]);
+      }
+    }
+    pairs.sort((a,b)=>a[0]-b[0]);
+    const assignment = new Array(targetPts.length).fill(-1);
+    const usedSrc = new Array(srcPts.length).fill(false);
+    const usedTarget = new Array(targetPts.length).fill(false);
+    let count = 0;
+    for(const [,i,j] of pairs){
+      if(usedTarget[i] || usedSrc[j]) continue;
+      assignment[i]=j; usedTarget[i]=true; usedSrc[j]=true; count++;
+      if(count===targetPts.length) break;
+    }
+    return count===targetPts.length ? assignment : null;
+  }
+
+  // No rotation/mirror search: a single fixed-orientation initial guess (nearest-
+  // neighbor after centering+scaling both point sets), then ICP-refined. This
+  // keeps whatever orientation the dots were drawn in — up stays up, left stays left.
+  function matchClusterToTarget(targetPts, clusterPts){
+    const tN = centerAndScale(targetPts);
+    const sN = centerAndScale(clusterPts);
+    let assignment = greedyAssign(tN, sN);
+    if(!assignment) return null;
+    let fit = fitScaleTranslate(assignment.map(idx => clusterPts[idx]), targetPts);
+    if(!fit) return null;
+    for(let iter=0; iter<6; iter++){
+      const transformed = clusterPts.map(p => applyTransform(p, fit));
+      const newAssignment = greedyAssign(targetPts, transformed);
+      if(!newAssignment) break;
+      const newFit = fitScaleTranslate(newAssignment.map(idx => clusterPts[idx]), targetPts);
+      if(!newFit) break;
+      fit = newFit; assignment = newAssignment;
+    }
+    return { fit, assignment, src: clusterPts };
+  }
+
+  // Correlates target blob sizes ("light intensity") against the matched stars'
+  // real magnitudes. 0 = perfectly correlated (biggest dot -> brightest star), 1 = anti-correlated.
+  function intensityResidual(targetIntensities, mags){
+    const brightness = mags.map(m => Math.pow(10, -0.4*m));
+    const z = arr => {
+      const n=arr.length; let mean=0; for(const v of arr) mean+=v; mean/=n;
+      let sd=0; for(const v of arr) sd+=(v-mean)**2; sd=Math.sqrt(sd/n)||1;
+      return arr.map(v => (v-mean)/sd);
+    };
+    const a=z(targetIntensities), b=z(brightness);
+    let dot=0,na=0,nb=0;
+    for(let i=0;i<a.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
+    const corr = (na>1e-9&&nb>1e-9) ? dot/Math.sqrt(na*nb) : 0;
+    return (1-corr)/2;
+  }
+
+  function angularSepDeg(ra1,dec1,ra2,dec2){
+    const r1=degToRad(ra1), d1=degToRad(dec1), r2=degToRad(ra2), d2=degToRad(dec2);
+    const cosc = Math.sin(d1)*Math.sin(d2)+Math.cos(d1)*Math.cos(d2)*Math.cos(r1-r2);
+    return Math.acos(Math.max(-1,Math.min(1,cosc)))*180/Math.PI;
+  }
+
+  // Searches the WHOLE bright-star catalog for the best-fitting patch of sky —
+  // not confined to any single IAU constellation's traditional membership. Every
+  // bright star is tried as a neighborhood anchor; stars within radius of it are
+  // pooled and fit against the target pattern (fixed orientation, see
+  // matchClusterToTarget). Combines geometric accuracy with light-intensity
+  // correlation into one score and returns every candidate sorted best-first.
+  function findBestStarMatches(targetPts, intensities, intensityWeight){
+    const stars = window.BRIGHT_STARS || [];
+    if(!stars.length) return [];
+    const n = targetPts.length;
+    const RADIUS_DEG = 30;
+    const NEARBY_CAP = 40;
+
+    const results = [];
+    for(let a=0; a<stars.length; a++){
+      const anchor = stars[a];
+      const nearby = [];
+      for(let b=0;b<stars.length;b++){
+        const sep = angularSepDeg(anchor.ra, anchor.dec, stars[b].ra, stars[b].dec);
+        if(sep<=RADIUS_DEG) nearby.push({s:stars[b], sep});
+      }
+      if(nearby.length < n) continue;
+      nearby.sort((x,y)=>x.sep-y.sep);
+
+      const projected = [];
+      for(const {s} of nearby.slice(0, NEARBY_CAP)){
+        const p = gnomonic(s.ra, s.dec, anchor.ra, anchor.dec);
+        if(p) projected.push({x:p.x, y:p.y, name:s.name, con:s.con, mag:s.mag, ra:s.ra, dec:s.dec});
+      }
+      if(projected.length < n) continue;
+
+      const result = matchClusterToTarget(targetPts, projected);
+      if(!result) continue;
+      const matchedStars = result.assignment.map(idx => result.src[idx]);
+      const intRes = intensityResidual(intensities, matchedStars.map(s=>s.mag));
+      const combinedScore = result.fit.residual + intensityWeight*intRes;
+      results.push({ anchorName: anchor.name, fit: result.fit, tangentRa: anchor.ra, tangentDec: anchor.dec, matchedStars, intensityResidual: intRes, combinedScore });
+    }
+    results.sort((a,b) => a.combinedScore-b.combinedScore);
+
+    // De-dupe near-identical candidates (same neighborhood, different anchor):
+    // skip any candidate sharing 60%+ of its matched stars with an already-kept, better one.
+    const kept = [];
+    for(const r of results){
+      const names = new Set(r.matchedStars.map(s=>s.name));
+      const dup = kept.some(k => {
+        let overlap=0; for(const nm of names) if(k._names.has(nm)) overlap++;
+        return overlap/names.size >= 0.6;
+      });
+      if(!dup){ r._names = names; kept.push(r); }
+      if(kept.length>=15) break;
+    }
+    kept.forEach(r => delete r._names);
+    return kept;
+  }
+
+  const CON_NAMES = {And:"Andromeda",Ant:"Antlia",Aps:"Apus",Aql:"Aquila",Aqr:"Aquarius",Ara:"Ara",Ari:"Aries",Aur:"Auriga",Boo:"Boötes",Cnc:"Cancer",CMa:"Canis Major",CMi:"Canis Minor",CVn:"Canes Venatici",Cae:"Caelum",Cam:"Camelopardalis",Cap:"Capricornus",Car:"Carina",Cas:"Cassiopeia",Cen:"Centaurus",Cep:"Cepheus",Cet:"Cetus",Cha:"Chamaeleon",Cir:"Circinus",Col:"Columba",Com:"Coma Berenices",CrA:"Corona Australis",CrB:"Corona Borealis",Crt:"Crater",Cru:"Crux",Crv:"Corvus",Cyg:"Cygnus",Del:"Delphinus",Dor:"Dorado",Dra:"Draco",Equ:"Equuleus",Eri:"Eridanus",For:"Fornax",Gem:"Gemini",Gru:"Grus",Her:"Hercules",Hor:"Horologium",Hya:"Hydra",Hyi:"Hydrus",Ind:"Indus",LMi:"Leo Minor",Lac:"Lacerta",Leo:"Leo",Lep:"Lepus",Lib:"Libra",Lup:"Lupus",Lyn:"Lynx",Lyr:"Lyra",Men:"Mensa",Mic:"Microscopium",Mon:"Monoceros",Mus:"Musca",Nor:"Norma",Oct:"Octans",Oph:"Ophiuchus",Ori:"Orion",Pav:"Pavo",Peg:"Pegasus",Per:"Perseus",Phe:"Phoenix",Pic:"Pictor",PsA:"Piscis Austrinus",Psc:"Pisces",Pup:"Puppis",Pyx:"Pyxis",Ret:"Reticulum",Scl:"Sculptor",Sco:"Scorpius",Sct:"Scutum",Ser:"Serpens",Sex:"Sextans",Sge:"Sagitta",Sgr:"Sagittarius",Tau:"Taurus",Tel:"Telescopium",TrA:"Triangulum Australe",Tri:"Triangulum",Tuc:"Tucana",UMa:"Ursa Major",UMi:"Ursa Minor",Vel:"Vela",Vir:"Virgo",Vol:"Volans",Vul:"Vulpecula"};
+
+  function formatRA(deg){
+    const d = ((deg%360)+360)%360;
+    const totalHours = d/15;
+    const h = Math.floor(totalHours);
+    const m = Math.round((totalHours-h)*60);
+    return `${h}h${String(m).padStart(2,'0')}m`;
+  }
+  function formatDec(deg){
+    const sign = deg<0 ? '−' : '+';
+    const ad = Math.abs(deg);
+    const d = Math.floor(ad);
+    const m = Math.round((ad-d)*60);
+    return `${sign}${d}°${String(m).padStart(2,'0')}'`;
+  }
+  // The best-fitting stars aren't required to belong to one official constellation
+  // (findBestStarMatches searches freely), so this reports whichever real
+  // constellation(s) the matched stars actually happen to come from, for display only.
+  function summarizeConstellations(matchedStars){
+    const cons = [...new Set(matchedStars.map(s=>s.con))];
+    return cons.map(c => CON_NAMES[c] || c).join(', ');
+  }
+
+  function niceStep(deg){
+    const candidates=[0.25,0.5,1,2,3,5,10,15,20,30,45];
+    for(const c of candidates) if(c>=deg) return c;
+    return candidates[candidates.length-1];
+  }
+
+  // The canonical (zoom=1) framing for a match: centered on the matched stars'
+  // mean RA/Dec, sized to fit them with the same padding buildSkyChartSvg uses
+  // by default. Used for the map-file export so it's independent of whatever
+  // zoom level the user happens to have the live chart set to.
+  function computeDefaultViewBounds(matchedStars){
+    let cra=0, cdec=0;
+    for(const s of matchedStars){ cra+=s.ra; cdec+=s.dec; }
+    cra/=matchedStars.length; cdec/=matchedStars.length;
+    const proj = matchedStars.map(s => gnomonic(s.ra, s.dec, cra, cdec));
+    const xs=proj.map(p=>p.x), ys=proj.map(p=>p.y);
+    const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+    const spanX=Math.max(maxX-minX,0.02), spanY=Math.max(maxY-minY,0.02);
+    const padX=spanX*0.4, padY=spanY*0.4;
+    const viewMinX=minX-padX, viewMaxX=maxX+padX, viewMinY=minY-padY, viewMaxY=maxY+padY;
+    const halfWDeg = Math.atan(Math.max(Math.abs(viewMinX),Math.abs(viewMaxX)))*180/Math.PI / Math.max(0.15, Math.cos(degToRad(cdec)));
+    const halfHDeg = Math.atan(Math.max(Math.abs(viewMinY),Math.abs(viewMaxY)))*180/Math.PI;
+    return { centerRa: cra, centerDec: cdec, halfWidthDeg: halfWDeg, halfHeightDeg: halfHDeg };
+  }
+
+  // Snapshots FIELD_STARS within a generous multiple of the default view so a
+  // standalone viewer has room to pan/zoom a bit without needing our full
+  // ~24k-star catalog — this makes the map file self-contained.
+  function collectFieldStarsForExport(cra, cdec, halfWDeg, halfHDeg){
+    const field = window.FIELD_STARS || [];
+    const raPad = halfWDeg*2.5+3, decPad = halfHDeg*2.5+3;
+    const out = [];
+    for(const [ra,dec,mag,name] of field){
+      const ddec = dec-cdec;
+      if(Math.abs(ddec) > decPad) continue;
+      const dra = (((ra-cra+540)%360)-180) * Math.cos(degToRad(cdec));
+      if(Math.abs(dra) > raPad) continue;
+      out.push([ra,dec,mag,name]);
+    }
+    return out;
+  }
+
+  // ---------- sky chart rendering ----------
+
+  // zoom: 1 = default framing (fits the matched pattern with padding); >1 zooms
+  // in (narrower field, fewer field stars); <1 zooms out (wider field, more of
+  // the surrounding sky). Shrinks/grows the same view box around its own
+  // center, so everything downstream (grid spacing, field-star radius, scale) adjusts automatically.
+  function buildSkyChartSvg(match, mstEdges, size, drawingLayer, zoom, bg, showNames, constOpacity){
+    zoom = zoom || 1;
+    showNames = showNames !== false;
+    constOpacity = constOpacity == null ? 1 : constOpacity;
+    const pal = paletteFor(bg);
+    const matchedStars = match.matchedStars;
+    let cra=0, cdec=0;
+    for(const s of matchedStars){ cra+=s.ra; cdec+=s.dec; }
+    cra/=matchedStars.length; cdec/=matchedStars.length;
+
+    const proj = matchedStars.map(s => gnomonic(s.ra, s.dec, cra, cdec));
+    const xs = proj.map(p=>p.x), ys = proj.map(p=>p.y);
+    const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+    const spanX = Math.max(maxX-minX, 0.02), spanY = Math.max(maxY-minY, 0.02);
+    const padX = spanX*0.4, padY = spanY*0.4;
+    let viewMinX=minX-padX, viewMaxX=maxX+padX, viewMinY=minY-padY, viewMaxY=maxY+padY;
+    {
+      const zcx=(viewMinX+viewMaxX)/2, zcy=(viewMinY+viewMaxY)/2;
+      const zhx=(viewMaxX-viewMinX)/2/zoom, zhy=(viewMaxY-viewMinY)/2/zoom;
+      viewMinX=zcx-zhx; viewMaxX=zcx+zhx; viewMinY=zcy-zhy; viewMaxY=zcy+zhy;
+    }
+
+    const halfWDeg = Math.atan(Math.max(Math.abs(viewMinX),Math.abs(viewMaxX)))*180/Math.PI / Math.max(0.15, Math.cos(degToRad(cdec)));
+    const halfHDeg = Math.atan(Math.max(Math.abs(viewMinY),Math.abs(viewMaxY)))*180/Math.PI;
+
+    const W = size, H = size;
+    const scale = Math.min(W/(viewMaxX-viewMinX), H/(viewMaxY-viewMinY)) * 0.9;
+    const ccx = (viewMinX+viewMaxX)/2, ccy=(viewMinY+viewMaxY)/2;
+    function toPixel(p){ return { x: W/2 + (p.x-ccx)*scale, y: H/2 - (p.y-ccy)*scale }; }
+
+    // ---- field stars (context) ----
+    const field = window.FIELD_STARS || [];
+    const raPad = halfWDeg*1.35+2, decPad = halfHDeg*1.35+2;
+    let fieldSvg = '';
+    for(const [ra,dec,mag,name] of field){
+      const ddec = dec-cdec;
+      if(Math.abs(ddec) > decPad) continue;
+      let dra = (((ra-cra+540)%360)-180) * Math.cos(degToRad(cdec));
+      if(Math.abs(dra) > raPad) continue;
+      const p = gnomonic(ra, dec, cra, cdec);
+      if(!p) continue;
+      const px = toPixel(p);
+      if(px.x<-20||px.x>W+20||px.y<-20||px.y>H+20) continue;
+      const r = Math.max(0.35, (7.5-mag)*0.4);
+      const op = Math.max(0.25, Math.min(0.9, (7.5-mag)/7));
+      fieldSvg += `<circle cx="${px.x.toFixed(1)}" cy="${px.y.toFixed(1)}" r="${r.toFixed(2)}" fill="${pal.fieldStar}" opacity="${op.toFixed(2)}"/>`;
+      if(showNames && name && mag < 3.0){
+        fieldSvg += `<text x="${(px.x+r+3).toFixed(1)}" y="${(px.y+3).toFixed(1)}" fill="${pal.gridLabel}" font-size="10" font-family="-apple-system,sans-serif">${name}</text>`;
+      }
+    }
+
+    // ---- coordinate grid ----
+    const raStep = niceStep(halfWDeg*2/6), decStep = niceStep(halfHDeg*2/6);
+    let gridSvg = '';
+    const startRA = Math.ceil((cra-halfWDeg*1.1)/raStep)*raStep;
+    for(let g=startRA; g<=cra+halfWDeg*1.1; g+=raStep){
+      let d = '';
+      for(let t=-1.05; t<=1.051; t+=0.1){
+        const dec = Math.max(-89, Math.min(89, cdec + t*halfHDeg));
+        const p = gnomonic(g, dec, cra, cdec);
+        if(!p) continue;
+        const px = toPixel(p);
+        d += (d ? ' L' : 'M') + px.x.toFixed(1) + ',' + px.y.toFixed(1);
+      }
+      if(d) gridSvg += `<path d="${d}" fill="none" stroke="${pal.grid}" stroke-width="0.6" opacity="0.55"/>`;
+      const labelP = gnomonic(g, cdec+halfHDeg*1.02, cra, cdec);
+      if(labelP){ const lp = toPixel(labelP); gridSvg += `<text x="${lp.x.toFixed(1)}" y="${(lp.y-4).toFixed(1)}" fill="${pal.gridLabel}" font-size="10" text-anchor="middle" font-family="monospace">${formatRA(g)}</text>`; }
+    }
+    const startDec = Math.ceil((cdec-halfHDeg*1.1)/decStep)*decStep;
+    for(let g=startDec; g<=cdec+halfHDeg*1.1; g+=decStep){
+      if(g<-90||g>90) continue;
+      let d = '';
+      for(let t=-1.05; t<=1.051; t+=0.1){
+        const ra = cra + t*halfWDeg;
+        const p = gnomonic(ra, g, cra, cdec);
+        if(!p) continue;
+        const px = toPixel(p);
+        d += (d ? ' L' : 'M') + px.x.toFixed(1) + ',' + px.y.toFixed(1);
+      }
+      if(d) gridSvg += `<path d="${d}" fill="none" stroke="${pal.grid}" stroke-width="0.6" opacity="0.55"/>`;
+      const labelP = gnomonic(cra-halfWDeg*1.02, g, cra, cdec);
+      if(labelP){ const lp = toPixel(labelP); gridSvg += `<text x="${(lp.x+2).toFixed(1)}" y="${(lp.y+3).toFixed(1)}" fill="${pal.gridLabel}" font-size="10" font-family="monospace">${formatDec(g)}</text>`; }
+    }
+
+    // ---- original white/line-art drawing, mesh-warped through the real
+    // gnomonic-deprojection nonlinearity so it stays aligned across the whole image ----
+    let drawingSvg = '';
+    if(drawingLayer && drawingLayer.img){
+      function mapPoint(x,y){
+        const tgt = { x, y: -y };
+        const g = applyInverseTransform(tgt, match.fit);
+        const { ra, dec } = inverseGnomonic(g.x, g.y, match.tangentRa, match.tangentDec);
+        const p2 = gnomonic(ra, dec, cra, cdec);
+        return p2 ? toPixel(p2) : { x:-1e5, y:-1e5 };
+      }
+      const warped = warpImageMesh(drawingLayer.img, drawingLayer.w, drawingLayer.h, mapPoint, W, H, 20);
+      drawingSvg = `<image href="${warped.toDataURL('image/png')}" x="0" y="0" width="${W}" height="${H}" opacity="0.8"/>`;
+    }
+
+    // ---- matched constellation: stick figure + labeled bright stars ----
+    // Each edge gets a dark halo (matching the sky fill) drawn first, so it reads
+    // cleanly as ONE line against busy underlying drawing linework instead of
+    // optically blending with it near dense hub points (a real minimum spanning
+    // tree already has the fewest possible edges — n-1 — so what can look like a
+    // "double line" there is this contrast issue, not an actual duplicate edge).
+    const pxStars = matchedStars.map(s => toPixel(gnomonic(s.ra, s.dec, cra, cdec)));
+    let mstSvg = '';
+    for(const [a,b] of mstEdges){
+      mstSvg += `<line x1="${pxStars[a].x.toFixed(1)}" y1="${pxStars[a].y.toFixed(1)}" x2="${pxStars[b].x.toFixed(1)}" y2="${pxStars[b].y.toFixed(1)}" stroke="${pal.bgFill}" stroke-width="3.6" opacity="0.85" stroke-linecap="round"/>`;
+    }
+    for(const [a,b] of mstEdges){
+      mstSvg += `<line x1="${pxStars[a].x.toFixed(1)}" y1="${pxStars[a].y.toFixed(1)}" x2="${pxStars[b].x.toFixed(1)}" y2="${pxStars[b].y.toFixed(1)}" stroke="#ffd76a" stroke-width="1.4" opacity="0.85"/>`;
+    }
+    let markSvg = '';
+    matchedStars.forEach((s,i) => {
+      const p = pxStars[i];
+      const r = Math.max(2.2, (6.5-s.mag)*1.1);
+      markSvg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${(r+3).toFixed(1)}" fill="#ffd76a" opacity="0.18"/>`;
+      markSvg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r.toFixed(1)}" fill="#fffbe8" stroke="#ffd76a" stroke-width="1"/>`;
+      if(showNames){
+        markSvg += `<text x="${p.x.toFixed(1)}" y="${(p.y-r-5).toFixed(1)}" fill="#ffe9a8" font-size="12" text-anchor="middle" font-family="-apple-system,sans-serif" font-weight="600">${s.name}</text>`;
+      }
+    });
+
+    const title = `Best-fit stars (${summarizeConstellations(matchedStars)}) · accuracy residual ${match.fit.residual.toFixed(3)} · intensity residual ${match.intensityResidual.toFixed(3)}`;
+    const centerLabel = `center RA ${formatRA(cra)}  Dec ${formatDec(cdec)}  ·  field ≈ ${(halfWDeg*2).toFixed(1)}°×${(halfHDeg*2).toFixed(1)}°`;
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H+56}" width="${W}" height="${H+56}">`+
+      `<rect width="${W}" height="${H+56}" fill="${pal.bgFill}"/>`+
+      `<g transform="translate(0,40)">${fieldSvg}${gridSvg}${drawingSvg}<g opacity="${constOpacity}">${mstSvg}${markSvg}</g></g>`+
+      `<text x="14" y="22" fill="${pal.title}" font-size="14" font-family="-apple-system,sans-serif" font-weight="600">${title}</text>`+
+      `<text x="14" y="${H+50}" fill="${pal.subtitle}" font-size="11" font-family="-apple-system,sans-serif">${centerLabel}</text>`+
+      `</svg>`;
+  }
+
+  // ---------- observer astronomy: when/where is this actually visible ----------
+  function julianDate(year, month, day, hourUTC){
+    if(month<=2){ year-=1; month+=12; }
+    const A = Math.floor(year/100), B = 2-A+Math.floor(A/4);
+    return Math.floor(365.25*(year+4716)) + Math.floor(30.6001*(month+1)) + day + B - 1524.5 + hourUTC/24;
+  }
+
+  function gmstHours(jd){
+    const T = (jd-2451545.0)/36525.0;
+    let g = 280.46061837 + 360.98564736629*(jd-2451545.0) + 0.000387933*T*T - T*T*T/38710000.0;
+    g = ((g%360)+360)%360;
+    return g/15;
+  }
+
+  // RA/Dec (deg) + observer lat/lon (deg, east positive) + Julian date -> altitude/azimuth (deg).
+  // Azimuth measured from North, clockwise through East (standard compass bearing).
+  function raDecToAltAz(raDeg, decDeg, latDeg, lonDeg, jd){
+    const lstHours = ((gmstHours(jd) + lonDeg/15)%24+24)%24;
+    let haDeg = lstHours*15 - raDeg;
+    haDeg = ((haDeg+180)%360+360)%360-180;
+    const haR=degToRad(haDeg), decR=degToRad(decDeg), latR=degToRad(latDeg);
+    const sinAlt = Math.sin(decR)*Math.sin(latR) + Math.cos(decR)*Math.cos(latR)*Math.cos(haR);
+    const alt = Math.asin(Math.max(-1,Math.min(1,sinAlt)));
+    const cosAz = (Math.sin(decR) - Math.sin(alt)*Math.sin(latR)) / (Math.cos(alt)*Math.cos(latR) || 1e-12);
+    let az = Math.acos(Math.max(-1,Math.min(1,cosAz)));
+    if(Math.sin(haR) > 0) az = 2*Math.PI - az;
+    return { alt: alt*180/Math.PI, az: az*180/Math.PI };
+  }
+
+  // Low-precision (~0.01°) solar position — plenty for estimating sunset/twilight.
+  function sunRaDec(jd){
+    const n = jd - 2451545.0;
+    const L = ((280.460 + 0.9856474*n)%360+360)%360;
+    const g = degToRad(((357.528 + 0.9856003*n)%360+360)%360);
+    const lambda = degToRad(L + 1.915*Math.sin(g) + 0.020*Math.sin(2*g));
+    const eps = degToRad(23.439 - 0.0000004*n);
+    const raR = Math.atan2(Math.cos(eps)*Math.sin(lambda), Math.cos(lambda));
+    const decR = Math.asin(Math.sin(eps)*Math.sin(lambda));
+    return { ra: ((raR*180/Math.PI)+360)%360, dec: decR*180/Math.PI };
+  }
+
+  function circularMeanDeg(degs){
+    let sx=0, sy=0;
+    for(const d of degs){ sx+=Math.cos(degToRad(d)); sy+=Math.sin(degToRad(d)); }
+    return ((Math.atan2(sy,sx)*180/Math.PI)+360)%360;
+  }
+
+  function azToCompass(az){
+    const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return dirs[Math.round(((az%360)+360)%360/22.5)%16];
+  }
+
+  // Europe/Rome is UTC+2 (CEST) for the summer months this tool is being used in.
+  const LOCAL_UTC_OFFSET = 2;
+
+  function localToJulianDate(dateStr, timeStr){
+    const [y,mo,d] = dateStr.split('-').map(Number);
+    const [hh,mm] = timeStr.split(':').map(Number);
+    return julianDate(y, mo, d, (hh+mm/60) - LOCAL_UTC_OFFSET);
+  }
+
+  // Hour angle = 0 (target crosses the meridian, its highest point) happens when
+  // local sidereal time equals the target's RA. Solves for that UTC hour directly
+  // rather than scanning, since sidereal vs. solar time drift is linear and known.
+  function computeTransitUTCHour(raDeg, lonDeg, year, month, day){
+    const gmst0 = gmstHours(julianDate(year, month, day, 0));
+    let hourUTC = ((raDeg/15 - lonDeg/15) - gmst0) / 1.00273790935;
+    return ((hourUTC%24)+24)%24;
+  }
+
+  // Scans the night (18:00 local to 06:00 next day, 15-min steps) for the best
+  // moment to look: sky dark enough (sun below -8°) AND the pattern as high as possible.
+  function findBestViewingWindow(centerRa, centerDec, lat, lon, dateStr){
+    const [y,mo,d] = dateStr.split('-').map(Number);
+    let best = null;
+    for(let h=18; h<=30; h+=0.25){
+      const hourUTC = (h%24) - LOCAL_UTC_OFFSET;
+      const dayOffset = h>=24 ? 1 : 0;
+      const jd = julianDate(y, mo, d+dayOffset, hourUTC);
+      const sun = sunRaDec(jd);
+      const sunAlt = raDecToAltAz(sun.ra, sun.dec, lat, lon, jd).alt;
+      const targetAlt = raDecToAltAz(centerRa, centerDec, lat, lon, jd).alt;
+      const dark = sunAlt < -8;
+      const score = dark ? targetAlt : targetAlt - 90; // heavily penalize daylight hours
+      if(!best || score>best.score){
+        best = { score, hourLocal: h%24, dark, sunAlt, targetAlt, dayOffset };
+      }
+    }
+    return best;
+  }
+
+  function buildFinderChartSvg(match, drawingLayer, lat, lon, jd, size, zoom, bg, showNames, constOpacity){
+    zoom = zoom || 1;
+    showNames = showNames !== false;
+    constOpacity = constOpacity == null ? 1 : constOpacity;
+    const pal = paletteFor(bg);
+    const stars = match.matchedStars;
+    const altAz = stars.map(s => raDecToAltAz(s.ra, s.dec, lat, lon, jd));
+    const centerAz = circularMeanDeg(altAz.map(p=>p.az));
+    const centerAlt = altAz.reduce((a,p)=>a+p.alt,0)/altAz.length;
+    const cosC = Math.max(0.2, Math.cos(degToRad(centerAlt)));
+
+    function toLocal(az,alt){
+      const dAz = (((az-centerAz+540)%360)-180) * cosC;
+      return { x: dAz, y: alt-centerAlt };
+    }
+    const localPts = altAz.map(p=>toLocal(p.az,p.alt));
+    const xs=localPts.map(p=>p.x), ys=localPts.map(p=>p.y);
+    const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+    const spanX=Math.max(maxX-minX,4), spanY=Math.max(maxY-minY,4);
+    const padX=spanX*0.4+3, padY=spanY*0.4+3;
+    let viewMinX=minX-padX, viewMaxX=maxX+padX, viewMinY=minY-padY, viewMaxY=maxY+padY;
+    {
+      const zcx=(viewMinX+viewMaxX)/2, zcy=(viewMinY+viewMaxY)/2;
+      const zhx=(viewMaxX-viewMinX)/2/zoom, zhy=(viewMaxY-viewMinY)/2/zoom;
+      viewMinX=zcx-zhx; viewMaxX=zcx+zhx; viewMinY=zcy-zhy; viewMaxY=zcy+zhy;
+    }
+
+    const W=size, H=Math.round(size*0.72);
+    const scale = Math.min(W/(viewMaxX-viewMinX), H/(viewMaxY-viewMinY))*0.9;
+    const ccx=(viewMinX+viewMaxX)/2, ccy=(viewMinY+viewMaxY)/2;
+    function toPixel(p){ return { x: W/2+(p.x-ccx)*scale, y: H/2-(p.y-ccy)*scale }; }
+
+    // ---- field stars (context) — same catalog as the RA/Dec chart, reprojected
+    // through Alt/Az for this time and place ----
+    const field = window.FIELD_STARS || [];
+    const azPad = (viewMaxX-viewMinX)/cosC*0.7+3;
+    const altPad = (viewMaxY-viewMinY)*0.7+3;
+    let fieldSvg = '';
+    for(const [ra,dec,mag,name] of field){
+      const p = raDecToAltAz(ra, dec, lat, lon, jd);
+      if(p.alt < -5) continue; // skip stars well below horizon, never relevant here
+      const dAlt = p.alt - centerAlt;
+      if(Math.abs(dAlt) > altPad) continue;
+      let dAz = (((p.az-centerAz+540)%360)-180);
+      if(Math.abs(dAz*cosC) > azPad) continue;
+      const px = toPixel(toLocal(p.az, p.alt));
+      if(px.x<-20||px.x>W+20||px.y<-20||px.y>H+20) continue;
+      const r = Math.max(0.35, (7.5-mag)*0.4);
+      const op = Math.max(0.25, Math.min(0.9, (7.5-mag)/7));
+      fieldSvg += `<circle cx="${px.x.toFixed(1)}" cy="${px.y.toFixed(1)}" r="${r.toFixed(2)}" fill="${pal.fieldStar}" opacity="${op.toFixed(2)}"/>`;
+      if(showNames && name && mag < 3.0){
+        fieldSvg += `<text x="${(px.x+r+3).toFixed(1)}" y="${(px.y+3).toFixed(1)}" fill="${pal.gridLabel}" font-size="10" font-family="-apple-system,sans-serif">${name}</text>`;
+      }
+    }
+
+    // ---- compass (azimuth) and altitude gridlines ----
+    const azSpanDeg = (viewMaxX-viewMinX)/cosC, altSpanDeg = viewMaxY-viewMinY;
+    const azStep = niceStep(azSpanDeg/5), altStep = niceStep(altSpanDeg/5);
+    let gridSvg = '';
+    const startAz = Math.ceil((centerAz-azSpanDeg*0.6)/azStep)*azStep;
+    for(let g=startAz; g<=centerAz+azSpanDeg*0.6; g+=azStep){
+      const p0=toPixel(toLocal(g, centerAlt-altSpanDeg*0.6)), p1=toPixel(toLocal(g, centerAlt+altSpanDeg*0.6));
+      gridSvg += `<line x1="${p0.x.toFixed(1)}" y1="${p0.y.toFixed(1)}" x2="${p1.x.toFixed(1)}" y2="${p1.y.toFixed(1)}" stroke="${pal.grid}" stroke-width="0.6" opacity="0.5"/>`;
+      const lbl = toPixel(toLocal(g, centerAlt+altSpanDeg*0.58));
+      gridSvg += `<text x="${lbl.x.toFixed(1)}" y="${(lbl.y-4).toFixed(1)}" fill="${pal.gridLabel}" font-size="11" text-anchor="middle" font-family="monospace">${azToCompass(g)} ${Math.round(((g%360)+360)%360)}°</text>`;
+    }
+    const startAlt = Math.ceil((centerAlt-altSpanDeg*0.6)/altStep)*altStep;
+    for(let g=startAlt; g<=centerAlt+altSpanDeg*0.6; g+=altStep){
+      const p0=toPixel(toLocal(centerAz-azSpanDeg*0.6, g)), p1=toPixel(toLocal(centerAz+azSpanDeg*0.6, g));
+      const isHorizon = Math.abs(g)<0.01;
+      gridSvg += `<line x1="${p0.x.toFixed(1)}" y1="${p0.y.toFixed(1)}" x2="${p1.x.toFixed(1)}" y2="${p1.y.toFixed(1)}" stroke="${isHorizon?'#ffb04a':pal.grid}" stroke-width="${isHorizon?1.6:0.6}" opacity="${isHorizon?0.9:0.5}"/>`;
+      const lbl = toPixel(toLocal(centerAz-azSpanDeg*0.58, g));
+      gridSvg += `<text x="${(lbl.x+3).toFixed(1)}" y="${(lbl.y+3).toFixed(1)}" fill="${isHorizon?'#ffb04a':pal.gridLabel}" font-size="11" font-family="monospace">${g.toFixed(0)}°${isHorizon?' horizon':''}</text>`;
+    }
+
+    // ---- the source drawing, mesh-warped through the real RA/Dec->Alt/Az chain.
+    // This map is genuinely curved (parallactic/"field" rotation varies across the
+    // sky, worst near the horizon), so it's warped through many small locally-affine
+    // triangles rather than one single affine matrix — a single matrix is only
+    // accurate right at the point it was sampled from and drifts everywhere else. ----
+    let drawingSvg = '';
+    if(drawingLayer && drawingLayer.img){
+      function mapPoint(x,y){
+        const tgt = { x, y: -y };
+        const g = applyInverseTransform(tgt, match.fit);
+        const { ra, dec } = inverseGnomonic(g.x, g.y, match.tangentRa, match.tangentDec);
+        const p = raDecToAltAz(ra, dec, lat, lon, jd);
+        return toPixel(toLocal(p.az, p.alt));
+      }
+      const warped = warpImageMesh(drawingLayer.img, drawingLayer.w, drawingLayer.h, mapPoint, W, H, 20);
+      drawingSvg = `<image href="${warped.toDataURL('image/png')}" x="0" y="0" width="${W}" height="${H}" opacity="0.8"/>`;
+    }
+
+    // ---- stick figure + labeled stars (dark halo first, see buildSkyChartSvg) ----
+    const pxStars = altAz.map(p => toPixel(toLocal(p.az,p.alt)));
+    let mstSvg = '';
+    for(const [a,b] of match.__mstEdges||[]){
+      mstSvg += `<line x1="${pxStars[a].x.toFixed(1)}" y1="${pxStars[a].y.toFixed(1)}" x2="${pxStars[b].x.toFixed(1)}" y2="${pxStars[b].y.toFixed(1)}" stroke="${pal.bgFill}" stroke-width="3.6" opacity="0.85" stroke-linecap="round"/>`;
+    }
+    for(const [a,b] of match.__mstEdges||[]){
+      mstSvg += `<line x1="${pxStars[a].x.toFixed(1)}" y1="${pxStars[a].y.toFixed(1)}" x2="${pxStars[b].x.toFixed(1)}" y2="${pxStars[b].y.toFixed(1)}" stroke="#ffd76a" stroke-width="1.4" opacity="0.85"/>`;
+    }
+    let markSvg = '';
+    stars.forEach((s,i) => {
+      const p = pxStars[i];
+      const below = altAz[i].alt < 0;
+      const r = Math.max(2.2, (6.5-s.mag)*1.1);
+      markSvg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${(r+3).toFixed(1)}" fill="${below?pal.dimStar:'#ffd76a'}" opacity="0.18"/>`;
+      markSvg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r.toFixed(1)}" fill="${below?pal.dimStar:'#fffbe8'}" stroke="${below?pal.dimStar:'#ffd76a'}" stroke-width="1"/>`;
+      if(showNames){
+        markSvg += `<text x="${p.x.toFixed(1)}" y="${(p.y-r-5).toFixed(1)}" fill="${below?pal.dimLabel:'#ffe9a8'}" font-size="12" text-anchor="middle" font-family="-apple-system,sans-serif" font-weight="600">${s.name}${below?' (below horizon)':''}</text>`;
+      }
+    });
+
+    const title = `Facing ${azToCompass(centerAz)} (${centerAz.toFixed(0)}°), ${centerAlt.toFixed(0)}° above the horizon`;
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H+40}" width="${W}" height="${H+40}">`+
+      `<rect width="${W}" height="${H+40}" fill="${pal.bgFill}"/>`+
+      `<g transform="translate(0,40)">${fieldSvg}${gridSvg}${drawingSvg}<g opacity="${constOpacity}">${mstSvg}${markSvg}</g></g>`+
+      `<text x="14" y="22" fill="${pal.title}" font-size="14" font-family="-apple-system,sans-serif" font-weight="600">${title}</text>`+
+      `</svg>`;
+  }
+
+  // Re-renders just the "Matching sky region" chart from the already-computed
+  // match — used both right after a search completes and whenever the zoom
+  // slider moves, so zooming never re-runs point detection/star matching.
+  function renderSkyChart(){
+    if(!lastBestMatch) return;
+    const zoom = parseFloat(document.getElementById('skyZoom').value) || 1;
+    const showNames = document.getElementById('showNames').checked;
+    const constOpacity = parseFloat(document.getElementById('constOpacity').value);
+    const svg = buildSkyChartSvg(lastBestMatch, lastMstEdges, CHART_SIZE, lastDrawingLayer, zoom, lastBgColor, showNames, constOpacity);
+    lastSvgString = svg;
+    lastChartSize = CHART_SIZE;
+    chartHolder.innerHTML = svg;
+  }
+
+  document.getElementById('skyZoom').addEventListener('input', () => {
+    document.getElementById('skyZoomVal').textContent = parseFloat(document.getElementById('skyZoom').value).toFixed(1)+'×';
+    renderSkyChart();
+  });
+
+  document.getElementById('showNames').addEventListener('change', () => {
+    renderSkyChart();
+    updateVisibility();
+  });
+
+  document.getElementById('constOpacity').addEventListener('input', () => {
+    document.getElementById('constOpacityVal').textContent = parseFloat(document.getElementById('constOpacity').value).toFixed(2);
+    renderSkyChart();
+    updateVisibility();
+  });
+
+  function updateVisibility(){
+    if(!lastBestMatch) return;
+    document.getElementById('finderSection').style.display = '';
+    const lat = parseFloat(document.getElementById('obsLat').value);
+    const lon = parseFloat(document.getElementById('obsLon').value);
+    const dateStr = document.getElementById('obsDate').value;
+    const timeStr = document.getElementById('obsTime').value;
+    if(!dateStr || !timeStr || isNaN(lat) || isNaN(lon)) return;
+
+    const jd = localToJulianDate(dateStr, timeStr);
+    const stars = lastBestMatch.matchedStars;
+    const altAz = stars.map(s => raDecToAltAz(s.ra, s.dec, lat, lon, jd));
+    const visibleCount = altAz.filter(p=>p.alt>0).length;
+    const avgAlt = altAz.reduce((a,p)=>a+p.alt,0)/altAz.length;
+    const avgAz = circularMeanDeg(altAz.map(p=>p.az));
+
+    const centerRaDeg = circularMeanDeg(stars.map(s=>s.ra));
+    const centerDec = stars.reduce((a,s)=>a+s.dec,0)/stars.length;
+
+    const sunNow = sunRaDec(jd);
+    const sunAltNow = raDecToAltAz(sunNow.ra, sunNow.dec, lat, lon, jd).alt;
+    const isDarkNow = sunAltNow < -8;
+
+    const best = findBestViewingWindow(centerRaDeg, centerDec, lat, lon, dateStr);
+    const bestH = Math.floor(best.hourLocal), bestM = Math.round((best.hourLocal-bestH)*60);
+    const bestLabel = `${String(bestH).padStart(2,'0')}:${String(bestM).padStart(2,'0')}${best.dayOffset?' (next day)':''}`;
+
+    const visibleTonight = best.dark && best.targetAlt > 10;
+
+    document.getElementById('visibilityStats').innerHTML =
+      `<b>${visibleTonight ? 'Yes — visible tonight' : 'Marginal/not well placed tonight'}</b> from lat ${lat.toFixed(2)}°, lon ${lon.toFixed(2)}°.<br>` +
+      `At the selected time: ${visibleCount}/${stars.length} stars above horizon, average altitude ${avgAlt.toFixed(0)}°, facing ${azToCompass(avgAz)} (${avgAz.toFixed(0)}°). Sky is ${isDarkNow?'dark':'too bright (daylight/twilight)'} then.<br>` +
+      `<b>Best time tonight: ${bestLabel} local</b> — pattern at ${best.targetAlt.toFixed(0)}° altitude, sky ${best.dark?'dark':'not fully dark'}.`;
+
+    const zoom = parseFloat(document.getElementById('finderZoom').value) || 1;
+    const showNames = document.getElementById('showNames').checked;
+    const constOpacity = parseFloat(document.getElementById('constOpacity').value);
+    const svg = buildFinderChartSvg({...lastBestMatch, __mstEdges: lastMstEdges}, lastDrawingLayer, lat, lon, jd, FINDER_SIZE, zoom, lastBgColor, showNames, constOpacity);
+    document.getElementById('finderHolder').innerHTML = svg;
+    lastFinderSvg = svg;
+  }
+
+  document.getElementById('finderZoom').addEventListener('input', () => {
+    document.getElementById('finderZoomVal').textContent = parseFloat(document.getElementById('finderZoom').value).toFixed(1)+'×';
+    updateVisibility();
+  });
+
+  document.getElementById('bestTimeBtn').addEventListener('click', () => {
+    if(!lastBestMatch) return;
+    const lat = parseFloat(document.getElementById('obsLat').value);
+    const lon = parseFloat(document.getElementById('obsLon').value);
+    const dateStr = document.getElementById('obsDate').value;
+    const stars = lastBestMatch.matchedStars;
+    const centerRaDeg = circularMeanDeg(stars.map(s=>s.ra));
+    const centerDec = stars.reduce((a,s)=>a+s.dec,0)/stars.length;
+    const best = findBestViewingWindow(centerRaDeg, centerDec, lat, lon, dateStr);
+    const bestH = Math.floor(best.hourLocal), bestM = Math.round((best.hourLocal-bestH)*60);
+    document.getElementById('obsTime').value = `${String(bestH).padStart(2,'0')}:${String(bestM).padStart(2,'0')}`;
+    if(best.dayOffset){
+      const [y,mo,d] = dateStr.split('-').map(Number);
+      const next = new Date(Date.UTC(y,mo-1,d+1));
+      document.getElementById('obsDate').value = next.toISOString().slice(0,10);
+    }
+    updateVisibility();
+  });
+
+  ['obsLat','obsLon','obsDate','obsTime'].forEach(id => {
+    document.getElementById(id).addEventListener('change', updateVisibility);
+  });
+
+  // Resolves a typed town/country name to lat/lon via OpenStreetMap's free
+  // Nominatim geocoder — the only feature here that needs a network request
+  // (the photo and star matching stay fully local).
+  async function lookupPlace(){
+    const q = document.getElementById('obsPlace').value.trim();
+    const statusEl = document.getElementById('obsPlaceStatus');
+    if(!q) return;
+    statusEl.textContent = 'Looking up…';
+    try{
+      const resp = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`);
+      if(!resp.ok) throw new Error('request failed');
+      const results = await resp.json();
+      if(!results.length){ statusEl.textContent = `No match for "${q}".`; return; }
+      const { lat, lon, display_name } = results[0];
+      document.getElementById('obsLat').value = parseFloat(lat).toFixed(4);
+      document.getElementById('obsLon').value = parseFloat(lon).toFixed(4);
+      statusEl.textContent = `Found: ${display_name}`;
+      updateVisibility();
+    } catch(err){
+      statusEl.textContent = 'Lookup failed — check your internet connection.';
+    }
+  }
+  document.getElementById('obsPlaceBtn').addEventListener('click', lookupPlace);
+  document.getElementById('obsPlace').addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); lookupPlace(); } });
+
+  let lastMstEdges = [];
+  let lastFinderSvg = '';
+
+  // ---------- main pipeline ----------
+  function snapshotCanvas(canvas){
+    const copy = document.createElement('canvas');
+    copy.width = canvas.width; copy.height = canvas.height;
+    copy.getContext('2d').drawImage(canvas, 0, 0);
+    return copy;
+  }
+
+  function drawDetectedOverlay(dots, mstEdges){
+    const ctx = srcCanvas.getContext('2d');
+    ctx.strokeStyle = 'rgba(110,168,254,0.9)';
+    ctx.lineWidth = 1.5;
+    for(const [a,b] of mstEdges){
+      ctx.beginPath();
+      ctx.moveTo(dots[a].x, dots[a].y);
+      ctx.lineTo(dots[b].x, dots[b].y);
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(110,168,254,0.95)';
+    for(const d of dots){
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, 4, 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  let processTimer = null;
+  function scheduleProcess(){
+    if(!sourceLoaded) return;
+    if(processTimer) clearTimeout(processTimer);
+    processTimer = setTimeout(process, 30);
+  }
+
+  async function process(){
+    const snapshot = snapshotCanvas(srcCanvas);
+    const sctx = snapshot.getContext('2d');
+    const imgData = sctx.getImageData(0,0,snapshot.width,snapshot.height);
+    const bg = sampleBackgroundColor(imgData);
+    lastBgColor = bg;
+    const dots = detectDots(imgData);
+    const drawingImgData = extractDrawingLayer(imgData, bg);
+    let drawingLayer = null;
+    if(drawingImgData){
+      const dataUrl = imageDataToDataURL(drawingImgData);
+      const img = await loadImage(dataUrl);
+      drawingLayer = { dataUrl, w: drawingImgData.width, h: drawingImgData.height, img };
+    }
+    if(dots.length < 3){
+      pathStats.textContent = `Only found ${dots.length} distinct point(s) — need at least 3 to match a shape. Try a higher-contrast image.`;
+      candidateListEl.innerHTML = '';
+      chartHolder.innerHTML = '';
+      lastSvgString=''; lastMatchData=null;
+      // redraw original without overlay
+      const c = srcCanvas.getContext('2d');
+      c.clearRect(0,0,srcCanvas.width,srcCanvas.height);
+      c.drawImage(snapshot,0,0);
+      return;
+    }
+
+    const mstEdges = buildMST(dots);
+    lastMstEdges = mstEdges;
+    const c = srcCanvas.getContext('2d');
+    c.clearRect(0,0,srcCanvas.width,srcCanvas.height);
+    c.drawImage(snapshot,0,0);
+    drawDetectedOverlay(dots, mstEdges);
+
+    pathStats.textContent = `Detected ${dots.length} points — searching the sky for the best-fitting stars…`;
+    candidateListEl.innerHTML = '';
+
+    const targetPts = dots.map(d => ({x:d.x, y:-d.y})); // flip Y: image-Y grows down, sky-Y should grow "up"
+    const intensities = dots.map(d => d.area);
+    const weight = parseFloat(weightEl.value);
+
+    const results = findBestStarMatches(targetPts, intensities, weight);
+    if(!results.length){
+      pathStats.textContent = 'No patch of sky has enough bright named stars near each other to match this many points. Try fewer points.';
+      chartHolder.innerHTML = '';
+      lastSvgString=''; lastMatchData=null;
+      return;
+    }
+
+    const best = results[0];
+    lastBestMatch = best;
+    lastDrawingLayer = drawingLayer;
+    lastMstEdges = mstEdges;
+    renderSkyChart();
+
+    const conSummary = summarizeConstellations(best.matchedStars);
+    pathStats.innerHTML = `Best-fitting stars found (from <b>${conSummary}</b>).<br>` +
+      `Accuracy residual: ${best.fit.residual.toFixed(3)} (lower = closer shape fit)<br>` +
+      `Intensity residual: ${best.intensityResidual.toFixed(3)} (lower = brightness order matches)<br>` +
+      `Combined score: ${best.combinedScore.toFixed(3)}`;
+
+    candidateListEl.innerHTML = '<div style="margin-bottom:4px; color:var(--text); font-weight:600;">Other close candidates</div>' +
+      results.slice(0,6).map((r,i) => {
+        return `<div class="${i===0?'best':''}">${i+1}. ${summarizeConstellations(r.matchedStars)} — score ${r.combinedScore.toFixed(3)} (acc ${r.fit.residual.toFixed(3)}, int ${r.intensityResidual.toFixed(3)})</div>`;
+      }).join('');
+
+    const viewBounds = computeDefaultViewBounds(best.matchedStars);
+    const fieldStarsSnapshot = collectFieldStarsForExport(viewBounds.centerRa, viewBounds.centerDec, viewBounds.halfWidthDeg, viewBounds.halfHeightDeg);
+    const obsLat = parseFloat(document.getElementById('obsLat').value) || 41.12;
+    const obsLon = parseFloat(document.getElementById('obsLon').value) || 16.87;
+
+    // A self-contained "map file": everything a separate viewer needs to redraw
+    // this chart and re-warp the source drawing, without our star catalog or
+    // matching code. RA/Dec/mag are the permanent, sky-fixed data; observerDefault
+    // is only a starting point for an Alt/Az viewer (real one should let the user
+    // change location/time and recompute with standard formulas — see below).
+    lastMatchData = {
+      schema: 'constellation-map-v1',
+      generatedAt: new Date().toISOString(),
+      howToRender: {
+        summary: 'Everything needed to redraw this chart and re-align "drawing" with the stars, independent of this app.',
+        starProjection: 'Place star (ra,dec) at gnomonic(ra, dec, view.centerRa, view.centerDec) -> {x,y} tangent-plane units, then apply your own pan/zoom/scale to pixels.',
+        gnomonicFormula: 'With ra0=view.centerRa, dec0=view.centerDec (radians): c = sin(dec0)*sin(dec) + cos(dec0)*cos(dec)*cos(ra-ra0); x = cos(dec)*sin(ra-ra0)/c; y = (cos(dec0)*sin(dec) - sin(dec0)*cos(dec)*cos(ra-ra0))/c.',
+        similarityTransform: 'projection.fit maps a tangent-plane point g (centered on projection.tangentRa/tangentDec) to ORIGINAL drawing-image pixels: x = fit.sRe*g.x - fit.sIm*g.y + fit.tx; y = fit.sIm*g.x + fit.sRe*g.y + fit.ty. Invert it (complex division) to go pixel -> tangent-plane.',
+        drawingOverlay: 'The "drawing" image is in ORIGINAL pixel space. For each source pixel (x,y): 1) target={x, y:-y}; 2) g = inverse(target, projection.fit); 3) (ra,dec) = inverseGnomonic(g, projection.tangentRa, projection.tangentDec); 4) reproject via gnomonic(ra,dec, view.centerRa, view.centerDec) to land it in the same tangent-plane units as the stars. This map is curved (not affine) — warp via a grid of small triangles (e.g. 20x20), each locally affine-fit from its own 3 corners, not one transform for the whole image.',
+      },
+      source: { imageWidth: srcCanvas.width, imageHeight: srcCanvas.height },
+      projection: {
+        type: 'gnomonic',
+        tangentRa: best.tangentRa,
+        tangentDec: best.tangentDec,
+        fit: { sRe: best.fit.sRe, sIm: best.fit.sIm, tx: best.fit.tx, ty: best.fit.ty },
+      },
+      drawing: drawingLayer ? { dataUrl: drawingLayer.dataUrl, width: drawingLayer.w, height: drawingLayer.h } : null,
+      view: viewBounds,
+      stars: best.matchedStars.map((s,i) => ({
+        id: i,
+        name: s.name,
+        constellation: CON_NAMES[s.con]||s.con,
+        ra: s.ra, dec: s.dec, mag: s.mag,
+        inputPoint: { x: dots[i].x, y: dots[i].y, area: dots[i].area },
+      })),
+      edges: mstEdges,
+      fieldStars: fieldStarsSnapshot,
+      fieldStarsFormat: ['ra_deg','dec_deg','mag','name_or_null'],
+      observerDefault: { lat: obsLat, lon: obsLon, label: 'Edit to your own location — see obsLat/obsLon in the app' },
+      match: {
+        constellationsUsed: conSummary,
+        accuracyResidual: best.fit.residual,
+        intensityResidual: best.intensityResidual,
+        combinedScore: best.combinedScore,
+        intensityWeight: weight,
+      },
+      otherCandidates: results.slice(1,10).map(r => ({ constellationsUsed: summarizeConstellations(r.matchedStars), combinedScore: r.combinedScore, accuracyResidual: r.fit.residual, intensityResidual: r.intensityResidual })),
+    };
+    updateVisibility();
+  }
+
+  // ---------- downloads ----------
+  document.getElementById('downloadSvg').addEventListener('click', () => {
+    if(!lastSvgString) return;
+    const blob = new Blob([lastSvgString], {type:'image/svg+xml'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'constellation-match.svg';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  document.getElementById('downloadJson').addEventListener('click', () => {
+    if(!lastMatchData) return;
+    const blob = new Blob([JSON.stringify(lastMatchData, null, 2)], {type:'application/json'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'constellation-map.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  document.getElementById('downloadPng').addEventListener('click', () => {
+    if(!lastSvgString) return;
+    const img = new Image();
+    const svgBlob = new Blob([lastSvgString], {type:'image/svg+xml;charset=utf-8'});
+    const url = URL.createObjectURL(svgBlob);
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = lastChartSize; c.height = lastChartSize+56;
+      const cx = c.getContext('2d');
+      cx.drawImage(img, 0, 0);
+      c.toBlob(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'constellation-match.png';
+        a.click();
+        URL.revokeObjectURL(a.href);
+        URL.revokeObjectURL(url);
+      });
+    };
+    img.src = url;
+  });
+})();
+</script>
+</body>
+</html>

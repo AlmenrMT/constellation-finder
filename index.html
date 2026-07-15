@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Constellation Finder</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{ --bg:#0b0d12; --panel:#1a1d24; --border:#333844; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe; }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text);
+    min-height:100vh; padding:32px 20px 60px;
+  }
+  .wrap{ max-width:480px; margin:0 auto; }
+  h1{ font-size:24px; margin:0 0 6px; }
+  p.lead{ color:var(--muted); font-size:14px; margin:0 0 28px; }
+  .card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
+  .card h2{ font-size:17px; margin:0 0 6px; }
+  .card p{ color:var(--muted); font-size:13px; margin:0 0 14px; line-height:1.5; }
+  a.btn{
+    display:inline-block; background:var(--accent); color:#07101f; font-weight:700; text-decoration:none;
+    padding:11px 18px; border-radius:10px; font-size:14px;
+  }
+  a.btn.secondary{ background:#2a2e38; color:var(--text); border:1px solid var(--border); }
+  .mapItem{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-top:1px solid var(--border); }
+  .mapItem:first-child{ border-top:none; }
+  .mapItem .name{ font-size:14px; }
+  .mapItem .actions{ display:flex; gap:8px; }
+  .mapItem a{ font-size:12px; color:var(--accent); text-decoration:none; }
+  footer{ color:var(--muted); font-size:11px; text-align:center; margin-top:20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔭 Constellation Finder</h1>
+  <p class="lead">Turn a photo into a star constellation, then find it in the real night sky with your phone.</p>
+
+  <div class="card">
+    <h2>1. Make a map</h2>
+    <p>Upload a photo (dots marking landmarks), find the best-fitting real stars, and export a map file.</p>
+    <a class="btn" href="finder/">Open Constellation Finder</a>
+  </div>
+
+  <div class="card">
+    <h2>2. Find it in the sky</h2>
+    <p>On your phone: load a map file and point your camera at the sky — it'll guide you straight to it.</p>
+    <a class="btn" href="viewer/">Open Viewer</a>
+  </div>
+
+  <div class="card">
+    <h2>Sample maps</h2>
+    <p>No map file yet? Try one of these directly in the viewer.</p>
+    <div id="mapList"></div>
+  </div>
+
+  <footer>Runs entirely in your browser — photos and location never leave your device.</footer>
+</div>
+
+<script>
+  const maps = [
+    { file: 'maps/anton-map.json', name: 'Anton' },
+  ];
+  document.getElementById('mapList').innerHTML = maps.map(m => `
+    <div class="mapItem">
+      <div class="name">${m.name}</div>
+      <div class="actions">
+        <a class="btn secondary" style="padding:7px 12px;" href="viewer/?map=${encodeURIComponent('/'+m.file)}">Open in viewer</a>
+      </div>
+    </div>
+  `).join('');
+</script>
+</body>
+</html>

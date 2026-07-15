@@ -1,0 +1,688 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Constellation Finder — AR Viewer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#1a1d24; --border:#333844; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe; --good:#5ee08a; --warn:#ffb04a;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{
+    margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text);
+    position:fixed; inset:0;
+  }
+  button{
+    background:#2a2e38; color:var(--text); border:1px solid var(--border); border-radius:10px;
+    padding:12px 16px; font-size:15px; cursor:pointer;
+  }
+  button:active{background:#353a46;}
+  button.primary{background:var(--accent); color:#07101f; border-color:var(--accent); font-weight:700;}
+  input[type=range]{width:100%; accent-color:var(--accent);}
+  input[type=text], input[type=number], input[type=date], input[type=time]{
+    background:#12151b; color:var(--text); border:1px solid var(--border); border-radius:8px; padding:8px; font-size:14px; width:100%;
+  }
+  label{font-size:12px; color:var(--muted); display:block; margin:10px 0 4px;}
+
+  /* ---- load screen ---- */
+  #loadScreen{
+    position:fixed; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:24px; gap:14px; text-align:center; overflow-y:auto;
+  }
+  #loadScreen h1{font-size:22px; margin:0 0 4px;}
+  #loadScreen p{color:var(--muted); font-size:14px; max-width:360px; margin:0;}
+  #loadScreen .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:20px; width:100%; max-width:380px;
+  }
+  #dropZone{
+    border:2px dashed var(--border); border-radius:12px; padding:28px 16px; text-align:center; color:var(--muted); font-size:13px;
+  }
+  #dropZone.drag{border-color:var(--accent); color:var(--text);}
+  #fileInput{display:none;}
+
+  /* ---- summary screen ---- */
+  #summaryScreen{ display:none; }
+  #summaryScreen .starList{ text-align:left; font-size:13px; color:var(--muted); max-height:160px; overflow-y:auto; margin-top:6px; }
+  #summaryScreen .starList div{ padding:3px 0; border-bottom:1px solid var(--border); }
+
+  /* ---- AR screen ---- */
+  #arScreen{ position:fixed; inset:0; display:none; background:#000; }
+  #camVideo{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  #arCanvas{ position:absolute; inset:0; width:100%; height:100%; }
+  #noCamNote{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted);
+    font-size:13px; padding:40px; text-align:center; pointer-events:none;
+  }
+
+  #topBar{
+    position:absolute; top:0; left:0; right:0; padding:10px 12px calc(10px + env(safe-area-inset-top)) 12px;
+    padding-top:calc(10px + env(safe-area-inset-top));
+    background:linear-gradient(rgba(0,0,0,0.65), transparent);
+    display:flex; align-items:flex-start; justify-content:space-between; gap:8px; z-index:5;
+  }
+  #topBar .title{ font-size:13px; font-weight:700; }
+  #topBar .sub{ font-size:11px; color:var(--muted); margin-top:2px; }
+  #gearBtn{ padding:8px 10px; font-size:16px; line-height:1; }
+
+  #guidePanel{
+    position:absolute; left:0; right:0; bottom:0; padding:14px 14px calc(14px + env(safe-area-inset-bottom)) 14px;
+    background:linear-gradient(transparent, rgba(0,0,0,0.75)); z-index:5; display:flex; flex-direction:column; gap:10px; align-items:center;
+  }
+  #guideText{ font-size:15px; font-weight:600; text-align:center; }
+  #guideSub{ font-size:12px; color:var(--muted); text-align:center; }
+
+  #radarWrap{ display:flex; align-items:center; gap:14px; }
+  #radar{ width:96px; height:96px; border-radius:50%; background:rgba(255,255,255,0.06); border:1px solid var(--border); position:relative; }
+  #radarDot{
+    position:absolute; width:12px; height:12px; border-radius:50%; background:var(--warn);
+    left:50%; top:50%; transform:translate(-50%,-50%); box-shadow:0 0 8px rgba(255,176,74,0.8);
+  }
+  #radarFov{
+    position:absolute; border:1px solid rgba(255,255,255,0.35); border-radius:6px; left:50%; top:50%; transform:translate(-50%,-50%);
+  }
+  #radarCenter{ position:absolute; width:4px; height:4px; border-radius:50%; background:#fff; left:50%; top:50%; transform:translate(-50%,-50%); }
+
+  /* ---- settings panel ---- */
+  #settingsPanel{
+    position:absolute; inset:0; background:rgba(10,12,16,0.97); z-index:20; display:none; overflow-y:auto;
+    padding:16px 16px calc(16px + env(safe-area-inset-bottom)) 16px; padding-top:calc(16px + env(safe-area-inset-top));
+  }
+  #settingsPanel h2{ font-size:16px; margin:0 0 10px; }
+  #settingsPanel .row2{ display:flex; align-items:center; gap:8px; }
+  #settingsPanel .checkRow{ display:flex; align-items:center; gap:8px; margin:12px 0; }
+  #settingsPanel .checkRow input{ width:auto; }
+  #settingsPanel .val{ font-size:12px; color:var(--muted); float:right; }
+  #manualControls{ display:none; }
+  .closeRow{ display:flex; justify-content:flex-end; margin-bottom:6px; }
+  .hint{ font-size:11px; color:var(--muted); margin-top:4px; }
+</style>
+</head>
+<body>
+
+<div id="loadScreen">
+  <h1>🔭 Constellation Finder</h1>
+  <p>Load a constellation map file (exported from the Constellation Finder app) and this will guide your phone to where it is in the real sky, right now.</p>
+  <div class="card">
+    <div id="dropZone">
+      Drop a <b>constellation-map.json</b> file here,<br>or tap to choose one
+    </div>
+    <input type="file" id="fileInput" accept="application/json,.json">
+    <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center;">
+      <button id="sampleBtn">Try sample map</button>
+    </div>
+    <div class="hint" id="loadStatus"></div>
+  </div>
+</div>
+
+<div id="summaryScreen">
+  <div class="card">
+    <h1 id="summaryTitle">Constellation loaded</h1>
+    <p id="summarySub"></p>
+    <div class="starList" id="summaryStars"></div>
+    <div style="margin-top:16px;">
+      <button class="primary" id="startBtn" style="width:100%;">Start finding it →</button>
+    </div>
+    <div class="hint" id="permStatus"></div>
+  </div>
+</div>
+
+<div id="arScreen">
+  <video id="camVideo" autoplay playsinline muted></video>
+  <canvas id="arCanvas"></canvas>
+  <div id="noCamNote"></div>
+
+  <div id="topBar">
+    <div>
+      <div class="title" id="targetTitle">—</div>
+      <div class="sub" id="targetSub">—</div>
+    </div>
+    <button id="gearBtn">⚙︎</button>
+  </div>
+
+  <div id="guidePanel">
+    <div id="guideText">Getting your location…</div>
+    <div id="guideSub"></div>
+    <div id="radarWrap">
+      <div id="radar"><div id="radarFov"></div><div id="radarCenter"></div><div id="radarDot"></div></div>
+      <div id="radarLegend" style="font-size:11px; color:var(--muted); line-height:1.5;">
+        Dot = direction to constellation<br>Box = what your camera sees now<br>Center = you're pointed right at it
+      </div>
+    </div>
+  </div>
+
+  <div id="settingsPanel">
+    <div class="closeRow"><button id="closeSettingsBtn">Close ✕</button></div>
+    <h2>Display</h2>
+    <div class="checkRow"><input type="checkbox" id="showNames" checked><span>Show star names</span></div>
+    <div class="checkRow"><input type="checkbox" id="showDrawing"><span>Show your drawing overlay (may be slower)</span></div>
+    <label>Drawing opacity <span class="val" id="drawOpacityVal"></span></label>
+    <input type="range" id="drawOpacity" min="0" max="1" step="0.05" value="0.8">
+    <label>Camera field of view <span class="val" id="fovVal"></span></label>
+    <input type="range" id="fovSlider" min="30" max="100" step="1" value="65">
+    <div class="hint">If the stars look bigger/smaller than the real sky through your camera, adjust this.</div>
+
+    <h2 style="margin-top:20px;">Location &amp; time</h2>
+    <div class="checkRow"><input type="checkbox" id="manualToggle"><span>Use manual controls (no GPS/compass)</span></div>
+    <div id="manualControls">
+      <div class="row2">
+        <div style="flex:1;"><label>Latitude</label><input type="number" id="manLat" step="0.01" value="41.12"></div>
+        <div style="flex:1;"><label>Longitude</label><input type="number" id="manLon" step="0.01" value="16.87"></div>
+      </div>
+      <label>Heading (compass, 0=N, 90=E) <span class="val" id="manHeadingVal"></span></label>
+      <input type="range" id="manHeading" min="0" max="359" step="1" value="0">
+      <label>Tilt up from horizon <span class="val" id="manPitchVal"></span></label>
+      <input type="range" id="manPitch" min="-30" max="90" step="1" value="30">
+      <label>Date</label><input type="date" id="manDate">
+      <label>Time (local)</label><input type="time" id="manTime">
+      <div class="hint">Local time zone offset: <input type="number" id="manTz" step="0.5" value="2" style="width:60px; display:inline-block;"> hours from UTC</div>
+    </div>
+    <div class="hint" id="sensorStatus" style="margin-top:14px;"></div>
+    <button id="loadAnotherBtn" style="width:100%; margin-top:16px;">Load a different map</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  // ---------- astronomy math (self-contained, same formulas as the Constellation Finder app) ----------
+  function degToRad(d){ return d*Math.PI/180; }
+  function radToDeg(r){ return r*180/Math.PI; }
+
+  function julianDate(year, month, day, hourUTC){
+    if(month<=2){ year-=1; month+=12; }
+    const A = Math.floor(year/100), B = 2-A+Math.floor(A/4);
+    return Math.floor(365.25*(year+4716)) + Math.floor(30.6001*(month+1)) + day + B - 1524.5 + hourUTC/24;
+  }
+  function nowJulianDate(){
+    const d = new Date();
+    return julianDate(d.getUTCFullYear(), d.getUTCMonth()+1, d.getUTCDate(), d.getUTCHours()+d.getUTCMinutes()/60+d.getUTCSeconds()/3600);
+  }
+  function gmstHours(jd){
+    const T = (jd-2451545.0)/36525.0;
+    let g = 280.46061837 + 360.98564736629*(jd-2451545.0) + 0.000387933*T*T - T*T*T/38710000.0;
+    g = ((g%360)+360)%360;
+    return g/15;
+  }
+  function raDecToAltAz(raDeg, decDeg, latDeg, lonDeg, jd){
+    const lstHours = ((gmstHours(jd) + lonDeg/15)%24+24)%24;
+    let haDeg = lstHours*15 - raDeg;
+    haDeg = ((haDeg+180)%360+360)%360-180;
+    const haR=degToRad(haDeg), decR=degToRad(decDeg), latR=degToRad(latDeg);
+    const sinAlt = Math.sin(decR)*Math.sin(latR) + Math.cos(decR)*Math.cos(latR)*Math.cos(haR);
+    const alt = Math.asin(Math.max(-1,Math.min(1,sinAlt)));
+    const cosAz = (Math.sin(decR) - Math.sin(alt)*Math.sin(latR)) / (Math.cos(alt)*Math.cos(latR) || 1e-12);
+    let az = Math.acos(Math.max(-1,Math.min(1,cosAz)));
+    if(Math.sin(haR) > 0) az = 2*Math.PI - az;
+    return { alt: radToDeg(alt), az: radToDeg(az) };
+  }
+  function gnomonic(ra, dec, ra0, dec0){
+    const raR=degToRad(ra), decR=degToRad(dec), ra0R=degToRad(ra0), dec0R=degToRad(dec0);
+    const cosc = Math.sin(dec0R)*Math.sin(decR) + Math.cos(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R);
+    if(cosc<=0.01) return null;
+    return {
+      x: Math.cos(decR)*Math.sin(raR-ra0R)/cosc,
+      y: (Math.cos(dec0R)*Math.sin(decR) - Math.sin(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R))/cosc,
+    };
+  }
+  function inverseGnomonic(x, y, ra0, dec0){
+    const ra0R=degToRad(ra0), dec0R=degToRad(dec0);
+    const rho = Math.hypot(x,y);
+    if(rho < 1e-12) return { ra: ra0, dec: dec0 };
+    const c = Math.atan(rho);
+    const sinc = Math.sin(c), cosc = Math.cos(c);
+    const decR = Math.asin(cosc*Math.sin(dec0R) + (y*sinc*Math.cos(dec0R))/rho);
+    const raR = ra0R + Math.atan2(x*sinc, rho*Math.cos(dec0R)*cosc - y*Math.sin(dec0R)*sinc);
+    return { ra: radToDeg(raR), dec: radToDeg(decR) };
+  }
+  function applyInverseTransform(pt, fit){
+    const dx = pt.x - fit.tx, dy = pt.y - fit.ty;
+    const denom = fit.sRe*fit.sRe + fit.sIm*fit.sIm || 1e-12;
+    return { x: (dx*fit.sRe + dy*fit.sIm)/denom, y: (dy*fit.sRe - dx*fit.sIm)/denom };
+  }
+  function circularMeanDeg(degs){
+    let sx=0, sy=0;
+    for(const d of degs){ sx+=Math.cos(degToRad(d)); sy+=Math.sin(degToRad(d)); }
+    return ((radToDeg(Math.atan2(sy,sx)))+360)%360;
+  }
+  function angDiff(a,b){ return ((a-b+540)%360)-180; } // signed shortest a-b, degrees
+
+  // ---------- mesh warp (for the optional drawing overlay) ----------
+  function affineFrom3Points(s0,s1,s2, d0,d1,d2){
+    const x1=s0.x,y1=s0.y, x2=s1.x,y2=s1.y, x3=s2.x,y3=s2.y;
+    const det = x1*(y2-y3) - y1*(x2-x3) + (x2*y3-x3*y2);
+    if(Math.abs(det) < 1e-9) return null;
+    function solve(u1,u2,u3){
+      const p = (u1*(y2-y3) - y1*(u2-u3) + (u2*y3-u3*y2)) / det;
+      const q = (x1*(u2-u3) - u1*(x2-x3) + (x2*u3-x3*u2)) / det;
+      const r = (x1*(y2*u3-y3*u2) - y1*(x2*u3-x3*u2) + u1*(x2*y3-x3*y2)) / det;
+      return { p, q, r };
+    }
+    const row1 = solve(d0.x,d1.x,d2.x), row2 = solve(d0.y,d1.y,d2.y);
+    return { a:row1.p, b:row2.p, c:row1.q, d:row2.q, e:row1.r, f:row2.r };
+  }
+  function drawWarpedTriangle(ctx, img, p0, p1, p2){
+    const aff = affineFrom3Points(
+      {x:p0.sx,y:p0.sy}, {x:p1.sx,y:p1.sy}, {x:p2.sx,y:p2.sy},
+      {x:p0.dx,y:p0.dy}, {x:p1.dx,y:p1.dy}, {x:p2.dx,y:p2.dy}
+    );
+    if(!aff) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(p0.dx,p0.dy); ctx.lineTo(p1.dx,p1.dy); ctx.lineTo(p2.dx,p2.dy);
+    ctx.closePath(); ctx.clip();
+    ctx.transform(aff.a, aff.b, aff.c, aff.d, aff.e, aff.f);
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
+  }
+
+  // ---------- state ----------
+  let map = null;          // parsed map file
+  let drawingImg = null;   // decoded Image of map.drawing
+  let gridSourcePts = [];  // 21x21 grid over the drawing image, each with cached ra/dec
+  let targetAltAz = null;  // {az, alt} of the constellation's mean position — refreshed periodically
+  let starsAltAz = [];     // per-star current alt/az, refreshed alongside targetAltAz
+  let heading = 0;         // current compass heading the phone/camera faces, degrees, 0=N
+  let pitch = 30;          // current altitude the phone/camera points at, degrees above horizon
+  let lat = 41.12, lon = 16.87;
+  let manualMode = false;
+  let fovH = 65;
+  let lastAstroUpdate = 0;
+  let rafPending = false;
+
+  const loadScreen = document.getElementById('loadScreen');
+  const summaryScreen = document.getElementById('summaryScreen');
+  const arScreen = document.getElementById('arScreen');
+  const camVideo = document.getElementById('camVideo');
+  const arCanvas = document.getElementById('arCanvas');
+  const actx = arCanvas.getContext('2d');
+  const noCamNote = document.getElementById('noCamNote');
+
+  function resizeCanvas(){
+    arCanvas.width = window.innerWidth * (window.devicePixelRatio||1);
+    arCanvas.height = window.innerHeight * (window.devicePixelRatio||1);
+  }
+  window.addEventListener('resize', resizeCanvas);
+
+  // ---------- map file loading ----------
+  function loadMapObject(obj, sourceLabel){
+    map = obj;
+    document.getElementById('loadStatus').textContent = '';
+    document.getElementById('summaryTitle').textContent = summarizeStars(map.stars);
+    document.getElementById('summarySub').textContent = `${map.stars.length} stars · ${sourceLabel}`;
+    document.getElementById('summaryStars').innerHTML = map.stars.map(s => `<div>${s.name} — ${s.constellation} (mag ${s.mag})</div>`).join('');
+    if(map.observerDefault){
+      lat = map.observerDefault.lat; lon = map.observerDefault.lon;
+      document.getElementById('manLat').value = lat;
+      document.getElementById('manLon').value = lon;
+    }
+    if(map.drawing){
+      const img = new Image();
+      img.onload = () => { drawingImg = img; buildDrawingGrid(); };
+      img.src = map.drawing.dataUrl;
+    } else {
+      drawingImg = null;
+    }
+    loadScreen.style.display = 'none';
+    summaryScreen.style.display = 'flex';
+    summaryScreen.style.cssText += 'position:fixed; inset:0; flex-direction:column; align-items:center; justify-content:center; padding:24px;';
+  }
+
+  function summarizeStars(stars){
+    const cons = [...new Set(stars.map(s=>s.constellation))];
+    return cons.join(', ');
+  }
+
+  // Precomputes each drawing-grid point's fixed (ra,dec) once at load time —
+  // these don't change; only their Alt/Az (recomputed periodically) and screen
+  // position (recomputed every frame) do.
+  function buildDrawingGrid(){
+    if(!map.drawing || !map.projection) { gridSourcePts = []; return; }
+    const gridN = 20;
+    const w = map.drawing.width, h = map.drawing.height;
+    const pts = [];
+    for(let j=0;j<=gridN;j++){
+      for(let i=0;i<=gridN;i++){
+        const sx = w*i/gridN, sy = h*j/gridN;
+        const tgt = { x: sx, y: -sy };
+        const g = applyInverseTransform(tgt, map.projection.fit);
+        const { ra, dec } = inverseGnomonic(g.x, g.y, map.projection.tangentRa, map.projection.tangentDec);
+        pts.push({ sx, sy, ra, dec, i, j });
+      }
+    }
+    gridSourcePts = { gridN, pts };
+  }
+
+  document.getElementById('fileInput').addEventListener('change', e => {
+    const f = e.target.files[0];
+    if(!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try{ loadMapObject(JSON.parse(reader.result), f.name); }
+      catch(err){ document.getElementById('loadStatus').textContent = 'Could not read that file — is it a constellation map JSON?'; }
+    };
+    reader.readAsText(f);
+  });
+  document.getElementById('dropZone').addEventListener('click', () => document.getElementById('fileInput').click());
+  ['dragenter','dragover'].forEach(evt => document.getElementById('dropZone').addEventListener(evt, e => { e.preventDefault(); document.getElementById('dropZone').classList.add('drag'); }));
+  ['dragleave','drop'].forEach(evt => document.getElementById('dropZone').addEventListener(evt, e => { e.preventDefault(); document.getElementById('dropZone').classList.remove('drag'); }));
+  document.getElementById('dropZone').addEventListener('drop', e => {
+    const f = e.dataTransfer.files[0];
+    if(!f) return;
+    const reader = new FileReader();
+    reader.onload = () => { try{ loadMapObject(JSON.parse(reader.result), f.name); } catch(err){ document.getElementById('loadStatus').textContent = 'Could not read that file.'; } };
+    reader.readAsText(f);
+  });
+  document.getElementById('sampleBtn').addEventListener('click', async () => {
+    document.getElementById('loadStatus').textContent = 'Loading sample…';
+    try{
+      const resp = await fetch('sample-map.json');
+      const obj = await resp.json();
+      loadMapObject(obj, 'sample map');
+    }catch(err){ document.getElementById('loadStatus').textContent = 'Could not load sample map.'; }
+  });
+  document.getElementById('loadAnotherBtn').addEventListener('click', () => {
+    stopAll();
+    document.getElementById('settingsPanel').style.display = 'none';
+    arScreen.style.display = 'none';
+    summaryScreen.style.display = 'none';
+    loadScreen.style.display = 'flex';
+  });
+
+  // ---------- permissions + sensors ----------
+  let geoWatchId = null;
+  let orientationActive = false;
+  let orientationEventReceived = false;
+
+  function startGeolocation(){
+    if(!navigator.geolocation){ setSensorStatus('No GPS available on this device — using manual location.'); return; }
+    geoWatchId = navigator.geolocation.watchPosition(pos => {
+      lat = pos.coords.latitude; lon = pos.coords.longitude;
+      document.getElementById('manLat').value = lat.toFixed(4);
+      document.getElementById('manLon').value = lon.toFixed(4);
+    }, err => {
+      setSensorStatus('Location unavailable (' + err.message + ') — switch on manual controls to set it yourself.');
+    }, { enableHighAccuracy:false, maximumAge:30000, timeout:15000 });
+  }
+
+  function handleOrientation(e){
+    let h;
+    if(e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null){
+      h = e.webkitCompassHeading; // iOS Safari: already a true compass heading, 0=N clockwise
+    } else if(e.alpha !== null){
+      h = 360 - e.alpha; // Android absolute-orientation convention
+    } else return;
+    orientationEventReceived = true;
+    heading = ((h%360)+360)%360;
+    // beta: front-back tilt. Phone held upright like a viewfinder (screen facing
+    // user, camera facing the horizon) reads ~90°; tilting the top back toward
+    // the sky reduces beta toward 0 (pointing at zenith).
+    if(e.beta !== null) pitch = 90 - e.beta;
+    scheduleRender();
+  }
+
+  // Resolves once we've actually RECEIVED a compass reading (not just attached
+  // a listener) — desktop browsers, some Android WebViews, and devices with no
+  // magnetometer will happily grant "permission" and register the listener but
+  // never fire an event, which would otherwise leave heading/pitch stuck at
+  // their defaults with no indication anything's wrong.
+  function startOrientation(){
+    return new Promise(resolve => {
+      async function attach(){
+        if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+          try{
+            const res = await DeviceOrientationEvent.requestPermission();
+            if(res !== 'granted'){ setSensorStatus('Compass permission denied — switch on manual controls to set direction yourself.'); resolve(false); return; }
+          }catch(err){ setSensorStatus('Could not request compass permission — using manual controls.'); resolve(false); return; }
+        }
+        const evtName = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
+        window.addEventListener(evtName, handleOrientation);
+        setTimeout(() => {
+          orientationActive = orientationEventReceived;
+          if(!orientationEventReceived) setSensorStatus('No compass data received from this device/browser — switch on manual controls to set direction yourself.');
+          resolve(orientationEventReceived);
+        }, 1500);
+      }
+      attach();
+    });
+  }
+
+  async function startCamera(){
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal:'environment' } }, audio:false });
+      camVideo.srcObject = stream;
+      noCamNote.textContent = '';
+    }catch(err){
+      noCamNote.textContent = 'No camera access — showing sky guidance without a live camera background. (' + err.message + ')';
+      camVideo.style.display = 'none';
+    }
+  }
+
+  function stopAll(){
+    if(geoWatchId!==null) navigator.geolocation.clearWatch(geoWatchId);
+    geoWatchId = null;
+    if(camVideo.srcObject){ camVideo.srcObject.getTracks().forEach(t=>t.stop()); camVideo.srcObject=null; }
+  }
+
+  function setSensorStatus(msg){ document.getElementById('sensorStatus').textContent = msg; }
+
+  document.getElementById('startBtn').addEventListener('click', async () => {
+    summaryScreen.style.display = 'none';
+    arScreen.style.display = 'block';
+    resizeCanvas();
+    document.getElementById('guideText').textContent = 'Requesting permissions…';
+    // iOS Safari only allows DeviceOrientationEvent.requestPermission() while
+    // still inside the "recent user gesture" window from this tap — any other
+    // awaited async call (camera, geolocation) ahead of it consumes that
+    // window, and the permission request throws instead of prompting. So this
+    // must run first, before anything else async.
+    await startOrientation();
+    startGeolocation();
+    await startCamera();
+    if(!orientationActive){
+      document.getElementById('manualToggle').checked = true;
+      manualMode = true;
+      document.getElementById('manualControls').style.display = 'block';
+    }
+    const now = new Date();
+    document.getElementById('manDate').value = now.toISOString().slice(0,10);
+    document.getElementById('manTime').value = now.toTimeString().slice(0,5);
+    refreshAstro();
+    setInterval(refreshAstro, 30000);
+    requestAnimationFrame(renderLoop);
+  });
+
+  // ---------- manual controls ----------
+  const manualToggle = document.getElementById('manualToggle');
+  manualToggle.addEventListener('change', () => {
+    manualMode = manualToggle.checked;
+    document.getElementById('manualControls').style.display = manualMode ? 'block' : 'none';
+    scheduleRender();
+  });
+  document.getElementById('manHeading').addEventListener('input', e => {
+    document.getElementById('manHeadingVal').textContent = e.target.value+'°';
+    if(manualMode){ heading = parseFloat(e.target.value); scheduleRender(); }
+  });
+  document.getElementById('manPitch').addEventListener('input', e => {
+    document.getElementById('manPitchVal').textContent = e.target.value+'°';
+    if(manualMode){ pitch = parseFloat(e.target.value); scheduleRender(); }
+  });
+  ['manLat','manLon'].forEach(id => document.getElementById(id).addEventListener('change', () => {
+    lat = parseFloat(document.getElementById('manLat').value);
+    lon = parseFloat(document.getElementById('manLon').value);
+    refreshAstro();
+  }));
+  document.getElementById('fovSlider').addEventListener('input', e => {
+    fovH = parseFloat(e.target.value);
+    document.getElementById('fovVal').textContent = fovH+'°';
+    scheduleRender();
+  });
+  document.getElementById('drawOpacity').addEventListener('input', e => {
+    document.getElementById('drawOpacityVal').textContent = parseFloat(e.target.value).toFixed(2);
+    scheduleRender();
+  });
+  document.getElementById('showNames').addEventListener('change', scheduleRender);
+  document.getElementById('showDrawing').addEventListener('change', scheduleRender);
+  document.getElementById('gearBtn').addEventListener('click', () => { document.getElementById('settingsPanel').style.display='block'; });
+  document.getElementById('closeSettingsBtn').addEventListener('click', () => { document.getElementById('settingsPanel').style.display='none'; });
+  document.getElementById('fovVal').textContent = fovH+'°';
+  document.getElementById('drawOpacityVal').textContent = '0.80';
+  document.getElementById('manHeadingVal').textContent = '0°';
+  document.getElementById('manPitchVal').textContent = '30°';
+
+  function currentManualJulianDate(){
+    const dateStr = document.getElementById('manDate').value, timeStr = document.getElementById('manTime').value;
+    const tz = parseFloat(document.getElementById('manTz').value)||0;
+    if(!dateStr || !timeStr) return nowJulianDate();
+    const [y,mo,d] = dateStr.split('-').map(Number);
+    const [hh,mm] = timeStr.split(':').map(Number);
+    return julianDate(y, mo, d, (hh+mm/60) - tz);
+  }
+
+  // ---------- periodic astronomy refresh (slow — star positions barely move) ----------
+  function refreshAstro(){
+    if(!map) return;
+    const jd = manualMode ? currentManualJulianDate() : nowJulianDate();
+    starsAltAz = map.stars.map(s => ({ ...s, ...raDecToAltAz(s.ra, s.dec, lat, lon, jd) }));
+    const az = circularMeanDeg(starsAltAz.map(s=>s.az));
+    const alt = starsAltAz.reduce((a,s)=>a+s.alt,0)/starsAltAz.length;
+    targetAltAz = { az, alt };
+    if(gridSourcePts && gridSourcePts.pts){
+      for(const p of gridSourcePts.pts){
+        const p2 = raDecToAltAz(p.ra, p.dec, lat, lon, jd);
+        p.az = p2.az; p.alt = p2.alt;
+      }
+    }
+    scheduleRender();
+  }
+
+  function scheduleRender(){
+    if(rafPending) return;
+    rafPending = true;
+    requestAnimationFrame(renderLoop);
+  }
+
+  // ---------- main render loop ----------
+  function renderLoop(){
+    rafPending = false;
+    if(arScreen.style.display === 'none') return;
+    if(!targetAltAz){ requestAnimationFrame(renderLoop); return; }
+
+    const W = arCanvas.width, H = arCanvas.height;
+    actx.clearRect(0,0,W,H);
+    const fovV = fovH * (H/W);
+    const pxPerDegX = W/fovH, pxPerDegY = H/fovV;
+
+    function toScreen(az, alt){
+      const dAz = angDiff(az, heading), dAlt = alt - pitch;
+      return { x: W/2 + dAz*pxPerDegX, y: H/2 - dAlt*pxPerDegY, dAz, dAlt };
+    }
+
+    const showNames = document.getElementById('showNames').checked;
+    const showDrawing = document.getElementById('showDrawing').checked;
+    const drawOpacity = parseFloat(document.getElementById('drawOpacity').value);
+
+    // drawing overlay (optional, mesh-warped each frame from cached alt/az)
+    if(showDrawing && drawingImg && gridSourcePts && gridSourcePts.pts){
+      const gridN = gridSourcePts.gridN, pts = gridSourcePts.pts;
+      actx.globalAlpha = drawOpacity;
+      for(let j=0;j<gridN;j++){
+        for(let i=0;i<gridN;i++){
+          const p00=pts[j*(gridN+1)+i], p10=pts[j*(gridN+1)+i+1], p01=pts[(j+1)*(gridN+1)+i], p11=pts[(j+1)*(gridN+1)+i+1];
+          const d00=toScreen(p00.az,p00.alt), d10=toScreen(p10.az,p10.alt), d01=toScreen(p01.az,p01.alt), d11=toScreen(p11.az,p11.alt);
+          drawWarpedTriangle(actx, drawingImg, {sx:p00.sx,sy:p00.sy,dx:d00.x,dy:d00.y}, {sx:p10.sx,sy:p10.sy,dx:d10.x,dy:d10.y}, {sx:p01.sx,sy:p01.sy,dx:d01.x,dy:d01.y});
+          drawWarpedTriangle(actx, drawingImg, {sx:p10.sx,sy:p10.sy,dx:d10.x,dy:d10.y}, {sx:p11.sx,sy:p11.sy,dx:d11.x,dy:d11.y}, {sx:p01.sx,sy:p01.sy,dx:d01.x,dy:d01.y});
+        }
+      }
+      actx.globalAlpha = 1;
+    }
+
+    // constellation lines + stars
+    const pxStars = starsAltAz.map(s => toScreen(s.az, s.alt));
+    actx.lineCap = 'round';
+    for(const [a,b] of (map.edges||[])){
+      actx.strokeStyle = 'rgba(0,0,0,0.8)'; actx.lineWidth = 5*(W/900);
+      actx.beginPath(); actx.moveTo(pxStars[a].x,pxStars[a].y); actx.lineTo(pxStars[b].x,pxStars[b].y); actx.stroke();
+    }
+    for(const [a,b] of (map.edges||[])){
+      actx.strokeStyle = '#ffd76a'; actx.lineWidth = 2.2*(W/900);
+      actx.beginPath(); actx.moveTo(pxStars[a].x,pxStars[a].y); actx.lineTo(pxStars[b].x,pxStars[b].y); actx.stroke();
+    }
+    starsAltAz.forEach((s,i) => {
+      const p = pxStars[i];
+      const r = Math.max(4, (6.5-s.mag)*1.6) * (W/900);
+      actx.beginPath(); actx.arc(p.x,p.y,r+5,0,7); actx.fillStyle='rgba(255,215,106,0.18)'; actx.fill();
+      actx.beginPath(); actx.arc(p.x,p.y,r,0,7); actx.fillStyle='#fffbe8'; actx.strokeStyle='#ffd76a'; actx.lineWidth=1.5; actx.fill(); actx.stroke();
+      if(showNames){
+        actx.font = `600 ${Math.round(15*(W/900))}px -apple-system,sans-serif`;
+        actx.textAlign = 'center';
+        actx.fillStyle = 'rgba(0,0,0,0.8)'; actx.fillText(s.name, p.x, p.y-r-8*(W/900)+1);
+        actx.fillStyle = '#ffe9a8'; actx.fillText(s.name, p.x, p.y-r-8*(W/900));
+      }
+    });
+
+    updateGuidance(targetAltAz);
+    requestAnimationFrame(renderLoop);
+  }
+
+  // ---------- guidance UI (radar + text) ----------
+  function updateGuidance(target){
+    const dAz = angDiff(target.az, heading), dAlt = target.alt - pitch;
+    const dist = Math.hypot(dAz, dAlt*(1)); // rough combined angular distance
+    const inView = Math.abs(dAz) < fovH*0.42 && Math.abs(dAlt) < (fovH*(9/16))*0.42;
+
+    document.getElementById('targetTitle').textContent = summarizeStars(map.stars);
+    document.getElementById('targetSub').textContent = `alt ${target.alt.toFixed(0)}° · az ${target.az.toFixed(0)}°`;
+
+    if(target.alt < -2){
+      document.getElementById('guideText').textContent = "It's below the horizon right now";
+      document.getElementById('guideSub').textContent = 'Try again later, or pick a different time in Settings.';
+    } else if(inView){
+      document.getElementById('guideText').textContent = '✓ In view — look at your screen';
+      document.getElementById('guideSub').textContent = 'Hold steady and match the stars to the real sky.';
+    } else {
+      const lr = dAz > 3 ? 'right' : dAz < -3 ? 'left' : null;
+      const ud = dAlt > 3 ? 'up' : dAlt < -3 ? 'down' : null;
+      const parts = [];
+      if(lr) parts.push(`turn ${lr}`);
+      if(ud) parts.push(`tilt ${ud}`);
+      document.getElementById('guideText').textContent = parts.length ? `Turn: ${parts.join(' and ')}` : 'Almost there…';
+      document.getElementById('guideSub').textContent = `${Math.round(Math.abs(dist))}° to go`;
+    }
+
+    const radar = document.getElementById('radar');
+    const R = radar.clientWidth/2 - 8;
+    const maxRange = 90;
+    const rx = Math.max(-1,Math.min(1, dAz/maxRange)) * R;
+    const ry = Math.max(-1,Math.min(1, -dAlt/maxRange)) * R;
+    const dot = document.getElementById('radarDot');
+    dot.style.left = `calc(50% + ${rx}px)`;
+    dot.style.top = `calc(50% + ${ry}px)`;
+    dot.style.background = inView ? 'var(--good)' : 'var(--warn)';
+    const fovBox = document.getElementById('radarFov');
+    const boxW = Math.min(2*R, (fovH/maxRange)*R*2), boxH = Math.min(2*R, (fovH*9/16/maxRange)*R*2);
+    fovBox.style.width = boxW+'px'; fovBox.style.height = boxH+'px';
+  }
+
+  resizeCanvas();
+
+  // ?map=<url> lets a link open straight into a specific map (e.g. shared from
+  // a landing page) instead of making everyone use the file picker.
+  (async function loadFromQueryParam(){
+    const params = new URLSearchParams(location.search);
+    const mapUrl = params.get('map');
+    if(!mapUrl) return;
+    document.getElementById('loadStatus').textContent = 'Loading shared map…';
+    try{
+      const resp = await fetch(mapUrl);
+      if(!resp.ok) throw new Error('HTTP '+resp.status);
+      const obj = await resp.json();
+      loadMapObject(obj, mapUrl.split('/').pop());
+    }catch(err){
+      document.getElementById('loadStatus').textContent = 'Could not load the shared map (' + err.message + ') — pick a file instead.';
+    }
+  })();
+})();
+</script>
+</body>
+</html>
