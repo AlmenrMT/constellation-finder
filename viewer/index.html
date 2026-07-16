@@ -73,16 +73,19 @@
   #guideText{ font-size:15px; font-weight:600; text-align:center; }
   #guideSub{ font-size:12px; color:var(--muted); text-align:center; }
 
-  #radarWrap{ display:flex; align-items:center; gap:14px; }
-  #radar{ width:96px; height:96px; border-radius:50%; background:rgba(255,255,255,0.06); border:1px solid var(--border); position:relative; }
-  #radarDot{
-    position:absolute; width:12px; height:12px; border-radius:50%; background:var(--warn);
-    left:50%; top:50%; transform:translate(-50%,-50%); box-shadow:0 0 8px rgba(255,176,74,0.8);
+  /* ---- directional edge arrows: show up at whichever side you need to move toward ---- */
+  .edgeArrow{
+    position:absolute; z-index:6; display:none; flex-direction:column; align-items:center; gap:2px;
+    color:var(--warn); text-shadow:0 1px 4px rgba(0,0,0,0.9); pointer-events:none;
+    animation:edgePulse 1.1s ease-in-out infinite;
   }
-  #radarFov{
-    position:absolute; border:1px solid rgba(255,255,255,0.35); border-radius:6px; left:50%; top:50%; transform:translate(-50%,-50%);
-  }
-  #radarCenter{ position:absolute; width:4px; height:4px; border-radius:50%; background:#fff; left:50%; top:50%; transform:translate(-50%,-50%); }
+  .edgeArrow .glyph{ font-size:40px; line-height:1; font-weight:700; }
+  .edgeArrow .deg{ font-size:12px; font-weight:700; background:rgba(0,0,0,0.55); padding:2px 7px; border-radius:8px; }
+  #arrowLeft{ left:6px; top:50%; transform:translateY(-50%); }
+  #arrowRight{ right:6px; top:50%; transform:translateY(-50%); }
+  #arrowUp{ top:calc(env(safe-area-inset-top) + 64px); left:50%; transform:translateX(-50%); }
+  #arrowDown{ bottom:150px; left:50%; transform:translateX(-50%); }
+  @keyframes edgePulse{ 0%,100%{opacity:0.55;} 50%{opacity:1;} }
 
   /* ---- settings panel ---- */
   #settingsPanel{
@@ -141,15 +144,14 @@
     <button id="gearBtn">⚙︎</button>
   </div>
 
+  <div id="arrowLeft" class="edgeArrow"><span class="glyph">←</span><span class="deg"></span></div>
+  <div id="arrowRight" class="edgeArrow"><span class="glyph">→</span><span class="deg"></span></div>
+  <div id="arrowUp" class="edgeArrow"><span class="glyph">↑</span><span class="deg"></span></div>
+  <div id="arrowDown" class="edgeArrow"><span class="glyph">↓</span><span class="deg"></span></div>
+
   <div id="guidePanel">
     <div id="guideText">Getting your location…</div>
     <div id="guideSub"></div>
-    <div id="radarWrap">
-      <div id="radar"><div id="radarFov"></div><div id="radarCenter"></div><div id="radarDot"></div></div>
-      <div id="radarLegend" style="font-size:11px; color:var(--muted); line-height:1.5;">
-        Dot = direction to constellation<br>Box = what your camera sees now<br>Center = you're pointed right at it
-      </div>
-    </div>
   </div>
 
   <div id="settingsPanel">
@@ -287,8 +289,20 @@
   let lat = 41.12, lon = 16.87;
   let manualMode = false;
   let fovH = 65;
-  let lastAstroUpdate = 0;
   let rafPending = false;
+  let cameraActive = false;      // is getUserMedia currently live
+  let cameraTransition = false;  // guards against overlapping start/stop calls
+  let lastCameraCheck = 0;
+
+  // Camera should only ever be used on a phone — on desktop there's no "look
+  // through the camera at the sky" gesture that makes sense.
+  function isMobileDevice(){
+    const ua = navigator.userAgent || '';
+    if(/Mobi|Android|iPhone|iPad|iPod/i.test(ua)) return true;
+    if(navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean') return navigator.userAgentData.mobile;
+    return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches && Math.min(window.innerWidth, window.innerHeight) < 900);
+  }
+  const IS_MOBILE = isMobileDevice();
 
   const loadScreen = document.getElementById('loadScreen');
   const summaryScreen = document.getElementById('summaryScreen');
@@ -351,6 +365,23 @@
       }
     }
     gridSourcePts = { gridN, pts };
+    // Populate alt/az immediately using whatever lat/lon/time we already have,
+    // rather than leaving every grid point's alt/az undefined until the next
+    // scheduled refreshAstro() (up to 30s later, or never if that timer hasn't
+    // started yet) — that gap was why the drawing overlay would sometimes not
+    // appear at all: a triangle warped from an undefined alt/az produces NaN
+    // screen coordinates, and NaN passed to ctx.transform() throws, which
+    // silently killed the rest of that render call (including the stars/lines
+    // and the next requestAnimationFrame — so the whole view could freeze).
+    populateGridAltAz(manualMode ? currentManualJulianDate() : nowJulianDate());
+  }
+
+  function populateGridAltAz(jd){
+    if(!gridSourcePts || !gridSourcePts.pts) return;
+    for(const p of gridSourcePts.pts){
+      const p2 = raDecToAltAz(p.ra, p.dec, lat, lon, jd);
+      p.az = p2.az; p.alt = p2.alt;
+    }
   }
 
   document.getElementById('fileInput').addEventListener('change', e => {
@@ -447,14 +478,62 @@
     });
   }
 
-  async function startCamera(){
-    try{
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal:'environment' } }, audio:false });
-      camVideo.srcObject = stream;
-      noCamNote.textContent = '';
-    }catch(err){
-      noCamNote.textContent = 'No camera access — showing sky guidance without a live camera background. (' + err.message + ')';
+  // The camera is only ever turned on when it's actually useful: on a phone,
+  // showing the REAL current sky (not a manually-set time/place), with the
+  // constellation above the horizon and at least one of its stars in view.
+  // Everything else (below horizon, out of view, desktop, manual mode) shows
+  // the star/drawing overlay on a plain background instead — there's no live
+  // sky to usefully composite against in those cases.
+  function anyStarOnScreen(){
+    if(!starsAltAz.length) return false;
+    const W = arCanvas.width, H = arCanvas.height;
+    if(!W || !H) return false;
+    const fovV = fovH * (H/W);
+    const pxPerDegX = W/fovH, pxPerDegY = H/fovV;
+    for(const s of starsAltAz){
+      const dAz = angDiff(s.az, heading), dAlt = s.alt - pitch;
+      const x = W/2 + dAz*pxPerDegX, y = H/2 - dAlt*pxPerDegY;
+      if(x>=0 && x<=W && y>=0 && y<=H) return true;
+    }
+    return false;
+  }
+
+  async function setCameraActive(active, offReason){
+    if(active === cameraActive){ if(!active) noCamNote.textContent = offReason||''; return; }
+    if(active){
+      noCamNote.textContent = 'Starting camera…';
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal:'environment' } }, audio:false });
+        camVideo.srcObject = stream;
+        camVideo.style.display = '';
+        noCamNote.textContent = '';
+        cameraActive = true;
+      }catch(err){
+        noCamNote.textContent = 'Camera permission needed to show the live sky background. (' + err.message + ')';
+        camVideo.style.display = 'none';
+        cameraActive = false;
+      }
+    } else {
+      if(camVideo.srcObject){ camVideo.srcObject.getTracks().forEach(t=>t.stop()); camVideo.srcObject=null; }
       camVideo.style.display = 'none';
+      noCamNote.textContent = offReason || '';
+      cameraActive = false;
+    }
+  }
+
+  function evaluateCameraGate(){
+    if(cameraTransition) return;
+    let desired = false, reason = '';
+    if(!IS_MOBILE){ reason = 'Camera view is only used on mobile phones.'; }
+    else if(manualMode){ reason = "Camera paused — you're viewing a manually-set time/place, not your real location."; }
+    else if(!targetAltAz || targetAltAz.alt <= 0){ reason = "Camera paused — this constellation is below the horizon right now."; }
+    else if(!anyStarOnScreen()){ reason = 'Camera paused — turn toward the constellation to activate it.'; }
+    else { desired = true; }
+    if(desired !== cameraActive){
+      cameraTransition = true;
+      setCameraActive(desired, reason).finally(() => { cameraTransition = false; });
+    } else if(!desired){
+      noCamNote.textContent = reason;
     }
   }
 
@@ -462,6 +541,7 @@
     if(geoWatchId!==null) navigator.geolocation.clearWatch(geoWatchId);
     geoWatchId = null;
     if(camVideo.srcObject){ camVideo.srcObject.getTracks().forEach(t=>t.stop()); camVideo.srcObject=null; }
+    cameraActive = false;
   }
 
   function setSensorStatus(msg){ document.getElementById('sensorStatus').textContent = msg; }
@@ -478,7 +558,9 @@
     // must run first, before anything else async.
     await startOrientation();
     startGeolocation();
-    await startCamera();
+    // Camera is NOT started here — evaluateCameraGate() (called every render
+    // frame) starts/stops it on its own once the actual conditions are met
+    // (mobile + real time/place + constellation above horizon + on screen).
     if(!orientationActive){
       document.getElementById('manualToggle').checked = true;
       manualMode = true;
@@ -497,7 +579,7 @@
   manualToggle.addEventListener('change', () => {
     manualMode = manualToggle.checked;
     document.getElementById('manualControls').style.display = manualMode ? 'block' : 'none';
-    scheduleRender();
+    refreshAstro(); // switching real<->manual time/place should take effect immediately, not on the next 30s tick
   });
   document.getElementById('manHeading').addEventListener('input', e => {
     document.getElementById('manHeadingVal').textContent = e.target.value+'°';
@@ -512,6 +594,7 @@
     lon = parseFloat(document.getElementById('manLon').value);
     refreshAstro();
   }));
+  ['manDate','manTime','manTz'].forEach(id => document.getElementById(id).addEventListener('change', refreshAstro));
   document.getElementById('fovSlider').addEventListener('input', e => {
     fovH = parseFloat(e.target.value);
     document.getElementById('fovVal').textContent = fovH+'°';
@@ -547,12 +630,7 @@
     const az = circularMeanDeg(starsAltAz.map(s=>s.az));
     const alt = starsAltAz.reduce((a,s)=>a+s.alt,0)/starsAltAz.length;
     targetAltAz = { az, alt };
-    if(gridSourcePts && gridSourcePts.pts){
-      for(const p of gridSourcePts.pts){
-        const p2 = raDecToAltAz(p.ra, p.dec, lat, lon, jd);
-        p.az = p2.az; p.alt = p2.alt;
-      }
-    }
+    populateGridAltAz(jd);
     scheduleRender();
   }
 
@@ -566,7 +644,20 @@
   function renderLoop(){
     rafPending = false;
     if(arScreen.style.display === 'none') return;
-    if(!targetAltAz){ requestAnimationFrame(renderLoop); return; }
+    // Always keep the loop alive, no matter what happens inside a single frame
+    // — one bad frame (e.g. a transient NaN from stale sensor data) must never
+    // silently freeze the whole view, which is what an uncaught exception here
+    // used to do (canvas throws on non-finite transform values).
+    try{
+      renderFrame();
+    }catch(err){
+      console.error('renderLoop frame error (continuing):', err);
+    }
+    requestAnimationFrame(renderLoop);
+  }
+
+  function renderFrame(){
+    if(!targetAltAz) return;
 
     const W = arCanvas.width, H = arCanvas.height;
     actx.clearRect(0,0,W,H);
@@ -577,19 +668,23 @@
       const dAz = angDiff(az, heading), dAlt = alt - pitch;
       return { x: W/2 + dAz*pxPerDegX, y: H/2 - dAlt*pxPerDegY, dAz, dAlt };
     }
+    const finite = p => Number.isFinite(p.x) && Number.isFinite(p.y);
 
     const showNames = document.getElementById('showNames').checked;
     const showDrawing = document.getElementById('showDrawing').checked;
     const drawOpacity = parseFloat(document.getElementById('drawOpacity').value);
 
-    // drawing overlay (optional, mesh-warped each frame from cached alt/az)
+    // drawing overlay (optional, mesh-warped each frame from cached alt/az) —
+    // shown regardless of horizon/view state, same as the stars below.
     if(showDrawing && drawingImg && gridSourcePts && gridSourcePts.pts){
       const gridN = gridSourcePts.gridN, pts = gridSourcePts.pts;
       actx.globalAlpha = drawOpacity;
       for(let j=0;j<gridN;j++){
         for(let i=0;i<gridN;i++){
           const p00=pts[j*(gridN+1)+i], p10=pts[j*(gridN+1)+i+1], p01=pts[(j+1)*(gridN+1)+i], p11=pts[(j+1)*(gridN+1)+i+1];
+          if(p00.az===undefined||p10.az===undefined||p01.az===undefined||p11.az===undefined) continue;
           const d00=toScreen(p00.az,p00.alt), d10=toScreen(p10.az,p10.alt), d01=toScreen(p01.az,p01.alt), d11=toScreen(p11.az,p11.alt);
+          if(!finite(d00)||!finite(d10)||!finite(d01)||!finite(d11)) continue;
           drawWarpedTriangle(actx, drawingImg, {sx:p00.sx,sy:p00.sy,dx:d00.x,dy:d00.y}, {sx:p10.sx,sy:p10.sy,dx:d10.x,dy:d10.y}, {sx:p01.sx,sy:p01.sy,dx:d01.x,dy:d01.y});
           drawWarpedTriangle(actx, drawingImg, {sx:p10.sx,sy:p10.sy,dx:d10.x,dy:d10.y}, {sx:p11.sx,sy:p11.sy,dx:d11.x,dy:d11.y}, {sx:p01.sx,sy:p01.sy,dx:d01.x,dy:d01.y});
         }
@@ -597,19 +692,22 @@
       actx.globalAlpha = 1;
     }
 
-    // constellation lines + stars
+    // constellation lines + stars — always drawn, even below the horizon.
     const pxStars = starsAltAz.map(s => toScreen(s.az, s.alt));
     actx.lineCap = 'round';
     for(const [a,b] of (map.edges||[])){
+      if(!finite(pxStars[a])||!finite(pxStars[b])) continue;
       actx.strokeStyle = 'rgba(0,0,0,0.8)'; actx.lineWidth = 5*(W/900);
       actx.beginPath(); actx.moveTo(pxStars[a].x,pxStars[a].y); actx.lineTo(pxStars[b].x,pxStars[b].y); actx.stroke();
     }
     for(const [a,b] of (map.edges||[])){
+      if(!finite(pxStars[a])||!finite(pxStars[b])) continue;
       actx.strokeStyle = '#ffd76a'; actx.lineWidth = 2.2*(W/900);
       actx.beginPath(); actx.moveTo(pxStars[a].x,pxStars[a].y); actx.lineTo(pxStars[b].x,pxStars[b].y); actx.stroke();
     }
     starsAltAz.forEach((s,i) => {
       const p = pxStars[i];
+      if(!finite(p)) return;
       const r = Math.max(4, (6.5-s.mag)*1.6) * (W/900);
       actx.beginPath(); actx.arc(p.x,p.y,r+5,0,7); actx.fillStyle='rgba(255,215,106,0.18)'; actx.fill();
       actx.beginPath(); actx.arc(p.x,p.y,r,0,7); actx.fillStyle='#fffbe8'; actx.strokeStyle='#ffd76a'; actx.lineWidth=1.5; actx.fill(); actx.stroke();
@@ -622,14 +720,27 @@
     });
 
     updateGuidance(targetAltAz);
-    requestAnimationFrame(renderLoop);
+
+    const now = performance.now();
+    if(now - lastCameraCheck > 500){
+      lastCameraCheck = now;
+      evaluateCameraGate();
+    }
   }
 
   // ---------- guidance UI (radar + text) ----------
+  const arrowEls = {
+    left: document.getElementById('arrowLeft'), right: document.getElementById('arrowRight'),
+    up: document.getElementById('arrowUp'), down: document.getElementById('arrowDown'),
+  };
+
   function updateGuidance(target){
     const dAz = angDiff(target.az, heading), dAlt = target.alt - pitch;
-    const dist = Math.hypot(dAz, dAlt*(1)); // rough combined angular distance
-    const inView = Math.abs(dAz) < fovH*0.42 && Math.abs(dAlt) < (fovH*(9/16))*0.42;
+    const dist = Math.hypot(dAz, dAlt);
+    const W = arCanvas.width||1, H = arCanvas.height||1;
+    const halfFovH = fovH/2*0.9, halfFovV = (fovH*(H/W))/2*0.9;
+    const inViewH = Math.abs(dAz) < halfFovH, inViewV = Math.abs(dAlt) < halfFovV;
+    const inView = inViewH && inViewV;
 
     document.getElementById('targetTitle').textContent = summarizeStars(map.stars);
     document.getElementById('targetSub').textContent = `alt ${target.alt.toFixed(0)}° · az ${target.az.toFixed(0)}°`;
@@ -641,27 +752,20 @@
       document.getElementById('guideText').textContent = '✓ In view — look at your screen';
       document.getElementById('guideSub').textContent = 'Hold steady and match the stars to the real sky.';
     } else {
-      const lr = dAz > 3 ? 'right' : dAz < -3 ? 'left' : null;
-      const ud = dAlt > 3 ? 'up' : dAlt < -3 ? 'down' : null;
-      const parts = [];
-      if(lr) parts.push(`turn ${lr}`);
-      if(ud) parts.push(`tilt ${ud}`);
-      document.getElementById('guideText').textContent = parts.length ? `Turn: ${parts.join(' and ')}` : 'Almost there…';
+      document.getElementById('guideText').textContent = 'Follow the arrows';
       document.getElementById('guideSub').textContent = `${Math.round(Math.abs(dist))}° to go`;
     }
 
-    const radar = document.getElementById('radar');
-    const R = radar.clientWidth/2 - 8;
-    const maxRange = 90;
-    const rx = Math.max(-1,Math.min(1, dAz/maxRange)) * R;
-    const ry = Math.max(-1,Math.min(1, -dAlt/maxRange)) * R;
-    const dot = document.getElementById('radarDot');
-    dot.style.left = `calc(50% + ${rx}px)`;
-    dot.style.top = `calc(50% + ${ry}px)`;
-    dot.style.background = inView ? 'var(--good)' : 'var(--warn)';
-    const fovBox = document.getElementById('radarFov');
-    const boxW = Math.min(2*R, (fovH/maxRange)*R*2), boxH = Math.min(2*R, (fovH*9/16/maxRange)*R*2);
-    fovBox.style.width = boxW+'px'; fovBox.style.height = boxH+'px';
+    // Directional edge arrows: each shows only when movement that way is still
+    // needed, with the remaining degrees so it's obvious how far off you are.
+    function setArrow(el, show, degrees){
+      el.style.display = show ? 'flex' : 'none';
+      if(show) el.querySelector('.deg').textContent = Math.round(Math.abs(degrees))+'°';
+    }
+    setArrow(arrowEls.left,  !inViewH && dAz<0, dAz);
+    setArrow(arrowEls.right, !inViewH && dAz>0, dAz);
+    setArrow(arrowEls.up,    !inViewV && dAlt>0, dAlt);
+    setArrow(arrowEls.down,  !inViewV && dAlt<0, dAlt);
   }
 
   resizeCanvas();
