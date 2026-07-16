@@ -282,6 +282,8 @@
   let map = null;          // parsed map file
   let drawingImg = null;   // decoded Image of map.drawing
   let gridSourcePts = [];  // 21x21 grid over the drawing image, each with cached ra/dec
+  let drawingSprite = null;     // pre-warped offscreen raster of the drawing (see buildDrawingSprite)
+  let drawingSpriteMeta = null; // {originDAz, originDAlt, pxPerDegX, pxPerDegY} to place the sprite each frame
   let targetAltAz = null;  // {az, alt} of the constellation's mean position — refreshed periodically
   let starsAltAz = [];     // per-star current alt/az, refreshed alongside targetAltAz
   let heading = 0;         // current compass heading the phone/camera faces, degrees, 0=N
@@ -315,6 +317,7 @@
   function resizeCanvas(){
     arCanvas.width = window.innerWidth * (window.devicePixelRatio||1);
     arCanvas.height = window.innerHeight * (window.devicePixelRatio||1);
+    buildDrawingSprite(); // pxPerDeg depends on canvas size, so the sprite must be rebuilt
   }
   window.addEventListener('resize', resizeCanvas);
 
@@ -382,6 +385,52 @@
       const p2 = raDecToAltAz(p.ra, p.dec, lat, lon, jd);
       p.az = p2.az; p.alt = p2.alt;
     }
+  }
+
+  // Warps the drawing ONCE into an offscreen raster (positioned relative to the
+  // constellation's own center, not the phone's live heading/pitch), instead of
+  // re-warping ~800 triangles every single animation frame. Re-warping that much
+  // every frame is expensive enough that on a real phone it can stall out
+  // entirely — which looked exactly like "the drawing overlay doesn't work."
+  // Rebuilt only when the underlying data actually changes (astro refresh,
+  // FOV/canvas size change) — every-frame positioning is then just one cheap
+  // drawImage() call (see renderFrame).
+  function buildDrawingSprite(){
+    drawingSprite = null; drawingSpriteMeta = null;
+    if(!drawingImg || !gridSourcePts || !gridSourcePts.pts || !targetAltAz) return;
+    const gridN = gridSourcePts.gridN, pts = gridSourcePts.pts;
+    const W = arCanvas.width||900, H = arCanvas.height||900;
+    const fovV = fovH*(H/W);
+    const pxPerDegX = W/fovH, pxPerDegY = H/fovV;
+
+    const offset = p => ({ dAz: angDiff(p.az, targetAltAz.az), dAlt: p.alt - targetAltAz.alt });
+    const valid = pts.filter(p => p.az!==undefined).map(offset);
+    if(!valid.length) return;
+    const minDAz=Math.min(...valid.map(o=>o.dAz)), maxDAz=Math.max(...valid.map(o=>o.dAz));
+    const minDAlt=Math.min(...valid.map(o=>o.dAlt)), maxDAlt=Math.max(...valid.map(o=>o.dAlt));
+    const padAz = Math.max(0.5, (maxDAz-minDAz)*0.06), padAlt = Math.max(0.5, (maxDAlt-minDAlt)*0.06);
+    const originDAz = minDAz-padAz, originDAlt = maxDAlt+padAlt; // top-left reference corner (max alt = top of screen)
+    const spriteW = Math.ceil((maxDAz-minDAz+2*padAz)*pxPerDegX);
+    const spriteH = Math.ceil((maxDAlt-minDAlt+2*padAlt)*pxPerDegY);
+    if(!(spriteW>0 && spriteH>0) || spriteW>4000 || spriteH>4000) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = spriteW; canvas.height = spriteH;
+    const ctx = canvas.getContext('2d');
+    const local = (dAz,dAlt) => ({ x:(dAz-originDAz)*pxPerDegX, y:(originDAlt-dAlt)*pxPerDegY });
+
+    for(let j=0;j<gridN;j++){
+      for(let i=0;i<gridN;i++){
+        const p00=pts[j*(gridN+1)+i], p10=pts[j*(gridN+1)+i+1], p01=pts[(j+1)*(gridN+1)+i], p11=pts[(j+1)*(gridN+1)+i+1];
+        if(p00.az===undefined||p10.az===undefined||p01.az===undefined||p11.az===undefined) continue;
+        const d00=local(offset(p00).dAz,offset(p00).dAlt), d10=local(offset(p10).dAz,offset(p10).dAlt);
+        const d01=local(offset(p01).dAz,offset(p01).dAlt), d11=local(offset(p11).dAz,offset(p11).dAlt);
+        drawWarpedTriangle(ctx, drawingImg, {sx:p00.sx,sy:p00.sy,dx:d00.x,dy:d00.y}, {sx:p10.sx,sy:p10.sy,dx:d10.x,dy:d10.y}, {sx:p01.sx,sy:p01.sy,dx:d01.x,dy:d01.y});
+        drawWarpedTriangle(ctx, drawingImg, {sx:p10.sx,sy:p10.sy,dx:d10.x,dy:d10.y}, {sx:p11.sx,sy:p11.sy,dx:d11.x,dy:d11.y}, {sx:p01.sx,sy:p01.sy,dx:d01.x,dy:d01.y});
+      }
+    }
+    drawingSprite = canvas;
+    drawingSpriteMeta = { originDAz, originDAlt, pxPerDegX, pxPerDegY };
   }
 
   document.getElementById('fileInput').addEventListener('change', e => {
@@ -598,6 +647,7 @@
   document.getElementById('fovSlider').addEventListener('input', e => {
     fovH = parseFloat(e.target.value);
     document.getElementById('fovVal').textContent = fovH+'°';
+    buildDrawingSprite(); // pxPerDeg depends on fovH
     scheduleRender();
   });
   document.getElementById('drawOpacity').addEventListener('input', e => {
@@ -631,6 +681,7 @@
     const alt = starsAltAz.reduce((a,s)=>a+s.alt,0)/starsAltAz.length;
     targetAltAz = { az, alt };
     populateGridAltAz(jd);
+    buildDrawingSprite();
     scheduleRender();
   }
 
@@ -674,22 +725,18 @@
     const showDrawing = document.getElementById('showDrawing').checked;
     const drawOpacity = parseFloat(document.getElementById('drawOpacity').value);
 
-    // drawing overlay (optional, mesh-warped each frame from cached alt/az) —
-    // shown regardless of horizon/view state, same as the stars below.
-    if(showDrawing && drawingImg && gridSourcePts && gridSourcePts.pts){
-      const gridN = gridSourcePts.gridN, pts = gridSourcePts.pts;
-      actx.globalAlpha = drawOpacity;
-      for(let j=0;j<gridN;j++){
-        for(let i=0;i<gridN;i++){
-          const p00=pts[j*(gridN+1)+i], p10=pts[j*(gridN+1)+i+1], p01=pts[(j+1)*(gridN+1)+i], p11=pts[(j+1)*(gridN+1)+i+1];
-          if(p00.az===undefined||p10.az===undefined||p01.az===undefined||p11.az===undefined) continue;
-          const d00=toScreen(p00.az,p00.alt), d10=toScreen(p10.az,p10.alt), d01=toScreen(p01.az,p01.alt), d11=toScreen(p11.az,p11.alt);
-          if(!finite(d00)||!finite(d10)||!finite(d01)||!finite(d11)) continue;
-          drawWarpedTriangle(actx, drawingImg, {sx:p00.sx,sy:p00.sy,dx:d00.x,dy:d00.y}, {sx:p10.sx,sy:p10.sy,dx:d10.x,dy:d10.y}, {sx:p01.sx,sy:p01.sy,dx:d01.x,dy:d01.y});
-          drawWarpedTriangle(actx, drawingImg, {sx:p10.sx,sy:p10.sy,dx:d10.x,dy:d10.y}, {sx:p11.sx,sy:p11.sy,dx:d11.x,dy:d11.y}, {sx:p01.sx,sy:p01.sy,dx:d01.x,dy:d01.y});
-        }
+    // drawing overlay: the sprite (see buildDrawingSprite) is pre-warped, so
+    // this is just one cheap repositioned drawImage() per frame — shown
+    // regardless of horizon/view state, same as the stars below.
+    if(showDrawing && drawingSprite && drawingSpriteMeta){
+      const c = toScreen(targetAltAz.az, targetAltAz.alt);
+      const destX = c.x + drawingSpriteMeta.originDAz*drawingSpriteMeta.pxPerDegX;
+      const destY = c.y - drawingSpriteMeta.originDAlt*drawingSpriteMeta.pxPerDegY;
+      if(finite({x:destX,y:destY})){
+        actx.globalAlpha = drawOpacity;
+        actx.drawImage(drawingSprite, destX, destY);
+        actx.globalAlpha = 1;
       }
-      actx.globalAlpha = 1;
     }
 
     // constellation lines + stars — always drawn, even below the horizon.
