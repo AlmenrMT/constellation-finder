@@ -494,10 +494,10 @@
     } else return;
     orientationEventReceived = true;
     heading = ((h%360)+360)%360;
-    // beta: front-back tilt. Phone held upright like a viewfinder (screen facing
-    // user, camera facing the horizon) reads ~90°; tilting the top back toward
-    // the sky reduces beta toward 0 (pointing at zenith).
-    if(e.beta !== null) pitch = 90 - e.beta;
+    // beta: front-back tilt. Empirically (real iPhone test), tilting the phone
+    // up toward the sky INCREASES beta relative to the ~90° viewfinder-upright
+    // reading, so pitch must track beta directly rather than inversely.
+    if(e.beta !== null) pitch = e.beta - 90;
     scheduleRender();
   }
 
