@@ -37,7 +37,7 @@
     background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:20px; width:100%; max-width:380px;
   }
   #dropZone{
-    border:2px dashed var(--border); border-radius:12px; padding:28px 16px; text-align:center; color:var(--muted); font-size:13px;
+    display:block; border:2px dashed var(--border); border-radius:12px; padding:28px 16px; text-align:center; color:var(--muted); font-size:13px; cursor:pointer;
   }
   #dropZone.drag{border-color:var(--accent); color:var(--text);}
   #fileInput{display:none;}
@@ -108,9 +108,9 @@
   <h1>🔭 Constellation Finder</h1>
   <p>Load a constellation map file (exported from the Constellation Finder app) and this will guide your phone to where it is in the real sky, right now.</p>
   <div class="card">
-    <div id="dropZone">
+    <label id="dropZone" for="fileInput">
       Drop a <b>constellation-map.json</b> file here,<br>or tap to choose one
-    </div>
+    </label>
     <input type="file" id="fileInput" accept="application/json,.json">
     <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center;">
       <button id="sampleBtn">Try sample map</button>
@@ -443,7 +443,6 @@
     };
     reader.readAsText(f);
   });
-  document.getElementById('dropZone').addEventListener('click', () => document.getElementById('fileInput').click());
   ['dragenter','dragover'].forEach(evt => document.getElementById('dropZone').addEventListener(evt, e => { e.preventDefault(); document.getElementById('dropZone').classList.add('drag'); }));
   ['dragleave','drop'].forEach(evt => document.getElementById('dropZone').addEventListener(evt, e => { e.preventDefault(); document.getElementById('dropZone').classList.remove('drag'); }));
   document.getElementById('dropZone').addEventListener('drop', e => {
@@ -494,10 +493,22 @@
     } else return;
     orientationEventReceived = true;
     heading = ((h%360)+360)%360;
-    // beta: front-back tilt. Empirically (real iPhone test), tilting the phone
-    // up toward the sky INCREASES beta relative to the ~90° viewfinder-upright
-    // reading, so pitch must track beta directly rather than inversely.
-    if(e.beta !== null) pitch = e.beta - 90;
+    // Elevation the camera points at, derived from the FULL orientation (beta
+    // AND gamma together) rather than beta alone. A beta-only formula is only
+    // correct while gamma (roll) is exactly 0 — but nobody holds a phone with
+    // zero roll while panning left/right, so any beta-only formula shows
+    // spurious vertical drift that tracks horizontal movement (this is what
+    // was reported as "up/down swapped" and, still, "drifts left/right").
+    // asin(-cos(beta)*cos(gamma)) reduces to the plain beta-90 formula when
+    // gamma=0 (they're trig-identical there) and correctly compensates for
+    // roll otherwise.
+    if(e.beta !== null && e.gamma !== null){
+      const betaR = degToRad(e.beta), gammaR = degToRad(e.gamma);
+      const s = Math.max(-1, Math.min(1, -Math.cos(betaR)*Math.cos(gammaR)));
+      pitch = radToDeg(Math.asin(s));
+    } else if(e.beta !== null){
+      pitch = e.beta - 90;
+    }
     scheduleRender();
   }
 
