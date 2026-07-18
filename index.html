@@ -60,7 +60,7 @@
   // Single source of truth: maps/manifest.json. Drop a new exported map file
   // into maps/ and add one line there — it shows up here AND in the viewer's
   // own "Shared maps" list, no other edits needed.
-  fetch('maps/manifest.json').then(r => r.json()).then(maps => {
+  fetch('maps/manifest.json?v=' + Date.now(), { cache: 'no-store' }).then(r => r.json()).then(maps => {
     document.getElementById('mapList').innerHTML = maps.map(m => `
       <div class="mapItem">
         <div class="name">${m.name}</div>

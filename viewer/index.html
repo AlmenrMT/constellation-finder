@@ -459,7 +459,7 @@
   (async function loadSharedMapsList(){
     const el = document.getElementById('sharedMaps');
     try{
-      const resp = await fetch('../maps/manifest.json');
+      const resp = await fetch('../maps/manifest.json?v=' + Date.now(), { cache: 'no-store' });
       if(!resp.ok) throw new Error('HTTP '+resp.status);
       const list = await resp.json();
       list.forEach(m => {
