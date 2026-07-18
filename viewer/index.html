@@ -112,9 +112,7 @@
       Drop a <b>constellation-map.json</b> file here,<br>or tap to choose one
     </label>
     <input type="file" id="fileInput">
-    <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center;">
-      <button id="sampleBtn">Try sample map</button>
-    </div>
+    <div id="sharedMaps" style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center;"></div>
     <div class="hint" id="loadStatus"></div>
   </div>
 </div>
@@ -452,14 +450,33 @@
     reader.onload = () => { try{ loadMapObject(JSON.parse(reader.result), f.name); } catch(err){ document.getElementById('loadStatus').textContent = 'Could not read that file.'; } };
     reader.readAsText(f);
   });
-  document.getElementById('sampleBtn').addEventListener('click', async () => {
-    document.getElementById('loadStatus').textContent = 'Loading sample…';
+  // Populates the "Shared maps" row from maps/manifest.json — a single list
+  // shared with the landing page (see constellation-site/index.html). Adding
+  // a map file there is the only step needed to make it show up in both
+  // places; if the manifest can't be reached (e.g. this file opened
+  // standalone, no ../maps/ sibling) the row just stays empty and the
+  // drop-zone/file-picker still work normally.
+  (async function loadSharedMapsList(){
+    const el = document.getElementById('sharedMaps');
     try{
-      const resp = await fetch('sample-map.json');
-      const obj = await resp.json();
-      loadMapObject(obj, 'sample map');
-    }catch(err){ document.getElementById('loadStatus').textContent = 'Could not load sample map.'; }
-  });
+      const resp = await fetch('../maps/manifest.json');
+      if(!resp.ok) throw new Error('HTTP '+resp.status);
+      const list = await resp.json();
+      list.forEach(m => {
+        const btn = document.createElement('button');
+        btn.textContent = m.name;
+        btn.addEventListener('click', async () => {
+          document.getElementById('loadStatus').textContent = 'Loading '+m.name+'…';
+          try{
+            const r = await fetch('../maps/'+m.file);
+            const obj = await r.json();
+            loadMapObject(obj, m.name);
+          }catch(err){ document.getElementById('loadStatus').textContent = 'Could not load '+m.name+'.'; }
+        });
+        el.appendChild(btn);
+      });
+    }catch(err){ /* no shared maps available here — picker/drop-zone still work */ }
+  })();
   document.getElementById('loadAnotherBtn').addEventListener('click', () => {
     stopAll();
     document.getElementById('settingsPanel').style.display = 'none';

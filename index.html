@@ -57,17 +57,21 @@
 </div>
 
 <script>
-  const maps = [
-    { file: 'maps/anton-map.json', name: 'Anton' },
-  ];
-  document.getElementById('mapList').innerHTML = maps.map(m => `
-    <div class="mapItem">
-      <div class="name">${m.name}</div>
-      <div class="actions">
-        <a class="btn secondary" style="padding:7px 12px;" href="viewer/?map=${encodeURIComponent('../'+m.file)}">Open in viewer</a>
+  // Single source of truth: maps/manifest.json. Drop a new exported map file
+  // into maps/ and add one line there — it shows up here AND in the viewer's
+  // own "Shared maps" list, no other edits needed.
+  fetch('maps/manifest.json').then(r => r.json()).then(maps => {
+    document.getElementById('mapList').innerHTML = maps.map(m => `
+      <div class="mapItem">
+        <div class="name">${m.name}</div>
+        <div class="actions">
+          <a class="btn secondary" style="padding:7px 12px;" href="viewer/?map=${encodeURIComponent('../maps/'+m.file)}">Open in viewer</a>
+        </div>
       </div>
-    </div>
-  `).join('');
+    `).join('');
+  }).catch(() => {
+    document.getElementById('mapList').innerHTML = '<div class="mapItem"><div class="name">No shared maps yet</div></div>';
+  });
 </script>
 </body>
 </html>
