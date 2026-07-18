@@ -70,6 +70,9 @@
       <button class="primary" id="uploadBtn">Upload image</button>
       <button id="sampleBtn">Try sample pattern</button>
     </div>
+    <div class="btnrow">
+      <button id="autoDetectBtn">Auto-detect from photo…</button>
+    </div>
     <input type="file" id="fileInput" accept="image/*">
 
     <label>Light-intensity weight <span class="val" id="weightVal"></span></label>
@@ -113,6 +116,36 @@
         <span class="val" id="skyZoomVal" style="min-width:32px;">1.0×</span>
       </div>
       <div class="canvasWrap" id="chartHolder"></div>
+    </div>
+  </div>
+</div>
+
+<div id="autoDetectOverlay" style="display:none; position:fixed; inset:0; background:rgba(10,10,12,0.8); z-index:30; align-items:center; justify-content:center; padding:20px; overflow-y:auto;">
+  <div class="panel" style="max-width:640px; width:100%; margin:20px 0;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h2 style="margin:0; font-size:16px;">Auto-detect landmarks from a photo</h2>
+      <button id="autoCloseBtn">Close ✕</button>
+    </div>
+    <p style="color:var(--muted); font-size:12px; margin:0 0 12px;">
+      Upload the original photo (for point detection) and, optionally, your inverted line-art image
+      (from imagetosketch.com etc.) to composite the dots onto. If you skip the line-art image, the
+      photo itself is used as a placeholder background.
+    </p>
+    <label style="display:block; font-size:12px; color:var(--muted); margin:8px 0 4px;">1. Original photo</label>
+    <input type="file" id="autoPhotoInput" accept="image/*">
+    <label style="display:block; font-size:12px; color:var(--muted); margin:8px 0 4px;">2. Line-art image (optional)</label>
+    <input type="file" id="autoLineArtInput" accept="image/*">
+    <div class="btnrow">
+      <button class="primary" id="autoRunBtn">Detect points</button>
+    </div>
+    <div class="stats" id="autoStatus"></div>
+    <div class="canvasWrap" id="autoCanvasWrap" style="display:none; margin-top:12px;">
+      <canvas id="autoCanvas"></canvas>
+    </div>
+    <p style="color:var(--muted); font-size:11px; margin:8px 0 0;" id="autoEditHint"></p>
+    <div class="btnrow">
+      <button class="primary" id="autoUseBtn" disabled>Use this pattern</button>
+      <button id="autoResetBtn" disabled>Reset to auto-detected</button>
     </div>
   </div>
 </div>
@@ -395,6 +428,263 @@
     });
   }
 
+  // ---------- automatic landmark detection (photo -> salient points) ----------
+  // Two tiers: MediaPipe FaceLandmarker when a face is present (precise, semantic
+  // points — eyes/nose/cheeks/chin), else a generic Shi-Tomasi corner detector
+  // that works on ANY subject (animal, car, house, ...) since it just finds
+  // well-spread high-contrast interest points rather than assuming face anatomy.
+
+  // A fixed, deliberately small subset of MediaPipe's 468/478-point face mesh —
+  // one point per major feature, spread from forehead to chin and side to side,
+  // matching the same kind of 6-9-point coverage as manual placement.
+  const FACE_LANDMARK_INDICES = [10, 6, 1, 33, 263, 234, 454, 152];
+
+  function grayscaleAndGradients(imgData){
+    const w = imgData.width, h = imgData.height, data = imgData.data;
+    const gray = new Float32Array(w*h);
+    for(let i=0,p=0;i<data.length;i+=4,p++){
+      gray[p] = 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
+    }
+    const gx = new Float32Array(w*h), gy = new Float32Array(w*h);
+    for(let y=1;y<h-1;y++){
+      for(let x=1;x<w-1;x++){
+        const i = y*w+x;
+        gx[i] = gray[i-1-w]*-1 + gray[i+1-w]*1 + gray[i-1]*-2 + gray[i+1]*2 + gray[i-1+w]*-1 + gray[i+1+w]*1;
+        gy[i] = gray[i-w-1]*-1 + gray[i-w]*-2 + gray[i-w+1]*-1 + gray[i+w-1]*1 + gray[i+w]*2 + gray[i+w+1]*1;
+      }
+    }
+    return { w, h, gx, gy };
+  }
+
+  // Integral (summed-area) image so an NxN windowed sum is O(1) per pixel.
+  function integralImage(arr, w, h){
+    const sum = new Float64Array((w+1)*(h+1));
+    for(let y=0;y<h;y++){
+      let rowSum = 0;
+      for(let x=0;x<w;x++){
+        rowSum += arr[y*w+x];
+        sum[(y+1)*(w+1)+(x+1)] = sum[y*(w+1)+(x+1)] + rowSum;
+      }
+    }
+    return sum;
+  }
+  function windowSum(integral, w, x0, y0, x1, y1){
+    return integral[(y1+1)*(w+1)+(x1+1)] - integral[(y0)*(w+1)+(x1+1)] - integral[(y1+1)*(w+1)+(x0)] + integral[(y0)*(w+1)+(x0)];
+  }
+
+  // Shi-Tomasi "good features to track": corner strength = min eigenvalue of the
+  // local structure tensor. Generic (no assumptions about what's in the photo),
+  // so it works on animals/cars/houses/etc, not just faces.
+  function shiTomasiCorners(imgData, maxPoints){
+    const { w, h, gx, gy } = grayscaleAndGradients(imgData);
+    const n = w*h;
+    const Ixx = new Float32Array(n), Iyy = new Float32Array(n), Ixy = new Float32Array(n);
+    for(let i=0;i<n;i++){ Ixx[i]=gx[i]*gx[i]; Iyy[i]=gy[i]*gy[i]; Ixy[i]=gx[i]*gy[i]; }
+    const win = Math.max(2, Math.round(Math.min(w,h)*0.015));
+    const iXX = integralImage(Ixx, w, h), iYY = integralImage(Iyy, w, h), iXY = integralImage(Ixy, w, h);
+
+    const margin = win+2;
+    const responses = new Float32Array(n);
+    for(let y=margin;y<h-margin;y++){
+      for(let x=margin;x<w-margin;x++){
+        const sxx = windowSum(iXX, w, x-win, y-win, x+win, y+win);
+        const syy = windowSum(iYY, w, x-win, y-win, x+win, y+win);
+        const sxy = windowSum(iXY, w, x-win, y-win, x+win, y+win);
+        const trace = sxx+syy, disc = Math.sqrt(Math.max(0,(sxx-syy)*(sxx-syy)+4*sxy*sxy));
+        responses[y*w+x] = (trace-disc)/2; // min eigenvalue
+      }
+    }
+
+    // Local non-max suppression, then greedy farthest-point selection so the
+    // chosen points are strong AND well spread out (not all bunched on one edge).
+    const nmsRadius = Math.max(3, Math.round(Math.min(w,h)*0.02));
+    const candidates = [];
+    for(let y=margin;y<h-margin;y++){
+      for(let x=margin;x<w-margin;x++){
+        const r = responses[y*w+x];
+        if(r<=0) continue;
+        let isMax = true;
+        for(let dy=-nmsRadius; dy<=nmsRadius && isMax; dy+=nmsRadius){
+          for(let dx=-nmsRadius; dx<=nmsRadius; dx+=nmsRadius){
+            if(!dx && !dy) continue;
+            const nx=x+dx, ny=y+dy;
+            if(nx<0||ny<0||nx>=w||ny>=h) continue;
+            if(responses[ny*w+nx] > r){ isMax=false; break; }
+          }
+        }
+        if(isMax) candidates.push({ x, y, r });
+      }
+    }
+    candidates.sort((a,b)=>b.r-a.r);
+    const minDist = Math.min(w,h)*0.12;
+    const picked = [];
+    for(const c of candidates){
+      if(picked.length>=maxPoints) break;
+      if(picked.some(p => Math.hypot(p.x-c.x,p.y-c.y) < minDist)) continue;
+      picked.push(c);
+    }
+    // Relax spacing if the subject didn't yield enough well-spread corners.
+    if(picked.length < Math.min(6,maxPoints)){
+      for(const c of candidates){
+        if(picked.length>=maxPoints) break;
+        if(picked.some(p => Math.hypot(p.x-c.x,p.y-c.y) < minDist*0.4)) continue;
+        if(picked.includes(c)) continue;
+        picked.push(c);
+      }
+    }
+    return picked;
+  }
+
+  // Gradient magnitude at a point, used as a stand-in "prominence" value for
+  // sizing the composited dot — same idea as "biggest dot = most salient point"
+  // whether the point came from a face landmark or a generic corner.
+  function gradientMagnitudeAt(gradInfo, x, y){
+    const { w, h, gx, gy } = gradInfo;
+    const xi = Math.max(1, Math.min(w-2, Math.round(x))), yi = Math.max(1, Math.min(h-2, Math.round(y)));
+    const i = yi*w+xi;
+    return Math.hypot(gx[i], gy[i]);
+  }
+
+  // ---------- auto-detect modal state/wiring ----------
+  const autoOverlay = document.getElementById('autoDetectOverlay');
+  const autoCanvas = document.getElementById('autoCanvas');
+  const autoStatus = document.getElementById('autoStatus');
+  const autoEditHint = document.getElementById('autoEditHint');
+  let autoBackdropImg = null;   // the image drawn behind the dots (line-art or photo fallback)
+  let autoPhotoCanvas = null;   // offscreen canvas of the original photo, for detection + gradient sampling
+  let autoDots = [];            // [{x,y,r}] in autoBackdropImg pixel space
+  let autoDetectedDots = [];    // snapshot of the raw auto-detected result, for "Reset"
+
+  document.getElementById('autoDetectBtn').addEventListener('click', () => {
+    autoOverlay.style.display = 'flex';
+  });
+  document.getElementById('autoCloseBtn').addEventListener('click', () => {
+    autoOverlay.style.display = 'none';
+  });
+
+  function renderAutoCanvas(){
+    if(!autoBackdropImg) return;
+    const w = autoBackdropImg.naturalWidth||autoBackdropImg.width, h = autoBackdropImg.naturalHeight||autoBackdropImg.height;
+    const dispScale = Math.min(1, 480/Math.max(w,h));
+    autoCanvas.width = Math.round(w*dispScale); autoCanvas.height = Math.round(h*dispScale);
+    const ctx = autoCanvas.getContext('2d');
+    ctx.drawImage(autoBackdropImg, 0, 0, autoCanvas.width, autoCanvas.height);
+    autoCanvas._scale = dispScale;
+    const mst = buildMST(autoDots);
+    ctx.strokeStyle = 'rgba(110,168,254,0.9)'; ctx.lineWidth = 1.5;
+    for(const [a,b] of mst){
+      ctx.beginPath();
+      ctx.moveTo(autoDots[a].x*dispScale, autoDots[a].y*dispScale);
+      ctx.lineTo(autoDots[b].x*dispScale, autoDots[b].y*dispScale);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#e6941e';
+    for(const d of autoDots){
+      ctx.beginPath();
+      ctx.arc(d.x*dispScale, d.y*dispScale, Math.max(3, d.r*dispScale), 0, Math.PI*2);
+      ctx.fill();
+    }
+  }
+
+  autoCanvas.addEventListener('click', e => {
+    if(!autoBackdropImg) return;
+    const rect = autoCanvas.getBoundingClientRect();
+    const scale = autoCanvas._scale || 1;
+    const x = (e.clientX-rect.left) * (autoCanvas.width/rect.width) / scale;
+    const y = (e.clientY-rect.top) * (autoCanvas.height/rect.height) / scale;
+    const hitIdx = autoDots.findIndex(d => Math.hypot(d.x-x, d.y-y) < Math.max(10, d.r*1.6));
+    if(hitIdx>=0){
+      autoDots.splice(hitIdx,1);
+    } else if(autoDots.length < 15){
+      const gradInfo = autoPhotoCanvas ? grayscaleAndGradients(autoPhotoCanvas.getContext('2d').getImageData(0,0,autoPhotoCanvas.width,autoPhotoCanvas.height)) : null;
+      const r = gradInfo ? Math.max(5, Math.min(11, 5+gradientMagnitudeAt(gradInfo, x*(autoPhotoCanvas.width/autoCanvas.width*(autoCanvas._scale||1)), y*(autoPhotoCanvas.height/autoCanvas.height*(autoCanvas._scale||1)))/40)) : 8;
+      autoDots.push({ x, y, r });
+    }
+    renderAutoCanvas();
+  });
+
+  document.getElementById('autoResetBtn').addEventListener('click', () => {
+    autoDots = autoDetectedDots.map(d => ({...d}));
+    renderAutoCanvas();
+  });
+
+  async function runAutoDetect(){
+    const photoFile = document.getElementById('autoPhotoInput').files[0];
+    if(!photoFile){ autoStatus.textContent = 'Choose the original photo first.'; return; }
+    autoStatus.textContent = 'Loading image(s)…';
+    document.getElementById('autoUseBtn').disabled = true;
+    document.getElementById('autoResetBtn').disabled = true;
+
+    const photoImg = await loadImage(URL.createObjectURL(photoFile));
+    const lineArtFile = document.getElementById('autoLineArtInput').files[0];
+    const lineArtImg = lineArtFile ? await loadImage(URL.createObjectURL(lineArtFile)) : null;
+    autoBackdropImg = lineArtImg || photoImg;
+
+    // Detection always runs against the ORIGINAL photo (real pixel content),
+    // even when compositing onto a separate line-art image.
+    const pw = photoImg.naturalWidth||photoImg.width, ph = photoImg.naturalHeight||photoImg.height;
+    const scale = Math.min(1, MAX_DIM/Math.max(pw,ph));
+    const dw = Math.max(1,Math.round(pw*scale)), dh = Math.max(1,Math.round(ph*scale));
+    autoPhotoCanvas = document.createElement('canvas');
+    autoPhotoCanvas.width = dw; autoPhotoCanvas.height = dh;
+    autoPhotoCanvas.getContext('2d').drawImage(photoImg, 0, 0, dw, dh);
+
+    const bw = autoBackdropImg.naturalWidth||autoBackdropImg.width, bh = autoBackdropImg.naturalHeight||autoBackdropImg.height;
+    const scaleToBackdropX = bw/dw, scaleToBackdropY = bh/dh;
+    const gradInfo = grayscaleAndGradients(autoPhotoCanvas.getContext('2d').getImageData(0,0,dw,dh));
+
+    function toBackdropDot(x, y){
+      const g = gradientMagnitudeAt(gradInfo, x, y);
+      const r = Math.max(5, Math.min(11, 5 + g/40));
+      return { x: x*scaleToBackdropX, y: y*scaleToBackdropY, r };
+    }
+
+    autoStatus.textContent = 'Looking for a face…';
+    let points = null;
+    if(window.detectFaceLandmarks){
+      try{ points = await window.detectFaceLandmarks(autoPhotoCanvas); }catch(err){ points = null; }
+    }
+
+    if(points && points.length){
+      autoStatus.textContent = `Face detected — placed ${FACE_LANDMARK_INDICES.length} landmark points.`;
+      autoDots = FACE_LANDMARK_INDICES.map(idx => toBackdropDot(points[idx].x, points[idx].y));
+    } else {
+      autoStatus.textContent = 'No face detected — using generic salient-point detection (works for animals, objects, buildings, etc).';
+      const corners = shiTomasiCorners({ width: dw, height: dh, data: autoPhotoCanvas.getContext('2d').getImageData(0,0,dw,dh).data }, 9);
+      if(corners.length < 3){
+        autoStatus.textContent = 'Could not find enough distinct points in this photo — try a higher-contrast image, or place dots manually.';
+        autoDots = [];
+      } else {
+        autoDots = corners.map(c => toBackdropDot(c.x, c.y));
+      }
+    }
+    autoDetectedDots = autoDots.map(d => ({...d}));
+    document.getElementById('autoCanvasWrap').style.display = '';
+    autoEditHint.textContent = 'Click a dot to remove it, or click empty space to add one, before using this pattern.';
+    document.getElementById('autoUseBtn').disabled = autoDots.length < 3;
+    document.getElementById('autoResetBtn').disabled = false;
+    renderAutoCanvas();
+  }
+  document.getElementById('autoRunBtn').addEventListener('click', () => { runAutoDetect(); });
+
+  document.getElementById('autoUseBtn').addEventListener('click', () => {
+    if(!autoBackdropImg || autoDots.length<3) return;
+    const w = autoBackdropImg.naturalWidth||autoBackdropImg.width, h = autoBackdropImg.naturalHeight||autoBackdropImg.height;
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(autoBackdropImg, 0, 0, w, h);
+    ctx.fillStyle = '#e6941e';
+    for(const d of autoDots){
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
+      ctx.fill();
+    }
+    const composite = new Image();
+    composite.onload = () => { loadImageToCanvas(composite); autoOverlay.style.display = 'none'; };
+    composite.src = c.toDataURL('image/png');
+  });
+
   // Solves the 2D affine (a,b,c,d,e,f) that maps 3 source points onto 3
   // destination points exactly, via Cramer's rule on the 3x3 linear system.
   function affineFrom3Points(s0,s1,s2, d0,d1,d2){
@@ -628,7 +918,23 @@
   // pooled and fit against the target pattern (fixed orientation, see
   // matchClusterToTarget). Combines geometric accuracy with light-intensity
   // correlation into one score and returns every candidate sorted best-first.
-  function findBestStarMatches(targetPts, intensities, intensityWeight){
+  // How much of `matchedStars` overlaps with any ALREADY-PUBLISHED constellation
+  // (see loadStarRegistry) — used to steer away from near-duplicate whole
+  // patterns (typically caused by two photos having similar facial-feature
+  // geometry), not to penalize incidental reuse of one or two individual stars.
+  function maxOverlapWithRegistry(matchedStars, registry){
+    if(!registry || !registry.length) return 0;
+    const names = matchedStars.map(s=>s.name);
+    let max = 0;
+    for(const entry of registry){
+      let overlap = 0;
+      for(const nm of names) if(entry.stars.has(nm)) overlap++;
+      max = Math.max(max, overlap/names.length);
+    }
+    return max;
+  }
+
+  function findBestStarMatches(targetPts, intensities, intensityWeight, registry){
     const stars = window.BRIGHT_STARS || [];
     if(!stars.length) return [];
     const n = targetPts.length;
@@ -675,7 +981,46 @@
       if(kept.length>=15) break;
     }
     kept.forEach(r => delete r._names);
-    return kept;
+
+    // Soft diversity re-rank: `kept` is already best-fit-first. Prefer the best
+    // fit that ISN'T a near-total repeat of an existing published constellation
+    // (>=70% of its stars already used together elsewhere) — that threshold is
+    // deliberately high so sharing one or two individual stars with another
+    // constellation never costs anything; only "this is basically the same
+    // pattern as an existing one" does. If literally every candidate is that
+    // similar (an unlikely edge case), fall back to the least-similar one rather
+    // than failing outright.
+    const SIMILARITY_LIMIT = 0.7;
+    kept.forEach(r => { r.registrySimilarity = maxOverlapWithRegistry(r.matchedStars, registry); });
+    const underLimit = kept.filter(r => r.registrySimilarity < SIMILARITY_LIMIT);
+    if(underLimit.length) return underLimit;
+    return kept.slice().sort((a,b) => a.registrySimilarity-b.registrySimilarity || a.combinedScore-b.combinedScore);
+  }
+
+  // Fetches the shared maps/manifest.json (the same registry the viewer's
+  // gallery uses — see constellation-viewer) plus every listed map's star list,
+  // so new matches can avoid reproducing an already-published constellation
+  // wholesale. Cached for the page's lifetime; not refetched on every slider
+  // tweak. Silently yields an empty registry if unreachable (e.g. this file
+  // opened standalone, no ../maps/ sibling) — diversity re-ranking just becomes
+  // a no-op in that case, nothing else breaks.
+  let starRegistryCache = null;
+  async function loadStarRegistry(){
+    if(starRegistryCache) return starRegistryCache;
+    try{
+      const resp = await fetch('../maps/manifest.json?v='+Date.now(), { cache:'no-store' });
+      if(!resp.ok) throw new Error('HTTP '+resp.status);
+      const list = await resp.json();
+      const entries = await Promise.all(list.map(async m => {
+        try{
+          const r = await fetch('../maps/'+m.file+'?v='+Date.now(), { cache:'no-store' });
+          const obj = await r.json();
+          return { name: m.name, stars: new Set((obj.stars||[]).map(s=>s.name)) };
+        }catch(err){ return null; }
+      }));
+      starRegistryCache = entries.filter(Boolean);
+    }catch(err){ starRegistryCache = []; }
+    return starRegistryCache;
   }
 
   const CON_NAMES = {And:"Andromeda",Ant:"Antlia",Aps:"Apus",Aql:"Aquila",Aqr:"Aquarius",Ara:"Ara",Ari:"Aries",Aur:"Auriga",Boo:"Boötes",Cnc:"Cancer",CMa:"Canis Major",CMi:"Canis Minor",CVn:"Canes Venatici",Cae:"Caelum",Cam:"Camelopardalis",Cap:"Capricornus",Car:"Carina",Cas:"Cassiopeia",Cen:"Centaurus",Cep:"Cepheus",Cet:"Cetus",Cha:"Chamaeleon",Cir:"Circinus",Col:"Columba",Com:"Coma Berenices",CrA:"Corona Australis",CrB:"Corona Borealis",Crt:"Crater",Cru:"Crux",Crv:"Corvus",Cyg:"Cygnus",Del:"Delphinus",Dor:"Dorado",Dra:"Draco",Equ:"Equuleus",Eri:"Eridanus",For:"Fornax",Gem:"Gemini",Gru:"Grus",Her:"Hercules",Hor:"Horologium",Hya:"Hydra",Hyi:"Hydrus",Ind:"Indus",LMi:"Leo Minor",Lac:"Lacerta",Leo:"Leo",Lep:"Lepus",Lib:"Libra",Lup:"Lupus",Lyn:"Lynx",Lyr:"Lyra",Men:"Mensa",Mic:"Microscopium",Mon:"Monoceros",Mus:"Musca",Nor:"Norma",Oct:"Octans",Oph:"Ophiuchus",Ori:"Orion",Pav:"Pavo",Peg:"Pegasus",Per:"Perseus",Phe:"Phoenix",Pic:"Pictor",PsA:"Piscis Austrinus",Psc:"Pisces",Pup:"Puppis",Pyx:"Pyxis",Ret:"Reticulum",Scl:"Sculptor",Sco:"Scorpius",Sct:"Scutum",Ser:"Serpens",Sex:"Sextans",Sge:"Sagitta",Sgr:"Sagittarius",Tau:"Taurus",Tel:"Telescopium",TrA:"Triangulum Australe",Tri:"Triangulum",Tuc:"Tucana",UMa:"Ursa Major",UMi:"Ursa Minor",Vel:"Vela",Vir:"Virgo",Vol:"Volans",Vul:"Vulpecula"};
@@ -1299,8 +1644,9 @@
     const targetPts = dots.map(d => ({x:d.x, y:-d.y})); // flip Y: image-Y grows down, sky-Y should grow "up"
     const intensities = dots.map(d => d.area);
     const weight = parseFloat(weightEl.value);
+    const registry = await loadStarRegistry();
 
-    const results = findBestStarMatches(targetPts, intensities, weight);
+    const results = findBestStarMatches(targetPts, intensities, weight, registry);
     if(!results.length){
       pathStats.textContent = 'No patch of sky has enough bright named stars near each other to match this many points. Try fewer points.';
       chartHolder.innerHTML = '';
@@ -1315,14 +1661,16 @@
     renderSkyChart();
 
     const conSummary = summarizeConstellations(best.matchedStars);
+    const reuseNote = best.registrySimilarity>0 ? ` · ${Math.round(best.registrySimilarity*100)}% stars shared with an existing map` : '';
     pathStats.innerHTML = `Best-fitting stars found (from <b>${conSummary}</b>).<br>` +
       `Accuracy residual: ${best.fit.residual.toFixed(3)} (lower = closer shape fit)<br>` +
       `Intensity residual: ${best.intensityResidual.toFixed(3)} (lower = brightness order matches)<br>` +
-      `Combined score: ${best.combinedScore.toFixed(3)}`;
+      `Combined score: ${best.combinedScore.toFixed(3)}${reuseNote}`;
 
     candidateListEl.innerHTML = '<div style="margin-bottom:4px; color:var(--text); font-weight:600;">Other close candidates</div>' +
       results.slice(0,6).map((r,i) => {
-        return `<div class="${i===0?'best':''}">${i+1}. ${summarizeConstellations(r.matchedStars)} — score ${r.combinedScore.toFixed(3)} (acc ${r.fit.residual.toFixed(3)}, int ${r.intensityResidual.toFixed(3)})</div>`;
+        const reuse = r.registrySimilarity>0 ? `, reuse ${Math.round(r.registrySimilarity*100)}%` : '';
+        return `<div class="${i===0?'best':''}">${i+1}. ${summarizeConstellations(r.matchedStars)} — score ${r.combinedScore.toFixed(3)} (acc ${r.fit.residual.toFixed(3)}, int ${r.intensityResidual.toFixed(3)}${reuse})</div>`;
       }).join('');
 
     const viewBounds = computeDefaultViewBounds(best.matchedStars);
@@ -1420,6 +1768,54 @@
     img.src = url;
   });
 })();
+</script>
+
+<script type="module">
+  import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+  let landmarkerPromise = null;
+  async function createLandmarker(delegate){
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+    );
+    return FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        delegate
+      },
+      runningMode: "IMAGE",
+      numFaces: 1
+    });
+  }
+
+  function getLandmarker(){
+    if(!landmarkerPromise){
+      landmarkerPromise = createLandmarker("GPU").catch(err => {
+        console.warn('GPU delegate failed for face landmarker, retrying on CPU', err);
+        return createLandmarker("CPU");
+      });
+    }
+    return landmarkerPromise;
+  }
+
+  let detectQueue = Promise.resolve();
+
+  window.detectFaceLandmarks = function(canvas){
+    const run = async () => {
+      try{
+        const landmarker = await getLandmarker();
+        const result = landmarker.detect(canvas);
+        if(!result.faceLandmarks || !result.faceLandmarks.length) return null;
+        return result.faceLandmarks[0].map(p => ({ x: p.x*canvas.width, y: p.y*canvas.height }));
+      } catch(err){
+        console.error('Face landmark detection failed', err);
+        return null;
+      }
+    };
+    const task = detectQueue.then(run, run);
+    detectQueue = task.catch(() => {});
+    return task;
+  };
 </script>
 </body>
 </html>
