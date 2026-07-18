@@ -1,3 +1,5 @@
 [
-  { "file": "anton-map.json", "name": "Anton" }
+  { "file": "anton-map.json", "name": "Anton (sample)" },
+  { "file": "Anton.json", "name": "Anton" },
+  { "file": "Jonas.json", "name": "Jonas" }
 ]
