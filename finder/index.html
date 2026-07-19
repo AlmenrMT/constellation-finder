@@ -1610,7 +1610,7 @@
     const viewMinX=minX-pad, viewMaxX=maxX+pad, viewMinY=minY-pad, viewMaxY=maxY+pad;
 
     const W = 1000, H = 1400;
-    const titleH = 150, skylineH = 170;
+    const titleH = 150, skylineH = 210;
     const skyTop = titleH, skyH = H - titleH - skylineH;
 
     const scale = Math.min(W/(viewMaxX-viewMinX), skyH/(viewMaxY-viewMinY)) * 0.98;
@@ -1645,6 +1645,8 @@
 
     // ---- the source drawing, mesh-warped the same way as the live finder chart ----
     let drawingSvg = '';
+    let drawingCanvas = null;
+    const drawingOpacity = 0.85;
     if(drawingLayer && drawingLayer.img){
       function mapPoint(x,y){
         const tgt = { x, y: -y };
@@ -1653,8 +1655,8 @@
         const p2 = gnomonic(ra, dec, cra, cdec);
         return p2 ? toPixel(p2) : { x:-1e5, y:-1e5 };
       }
-      const warped = warpImageMesh(drawingLayer.img, drawingLayer.w, drawingLayer.h, mapPoint, W, H, 24);
-      drawingSvg = `<image href="${warped.toDataURL('image/png')}" x="0" y="0" width="${W}" height="${H}" opacity="0.85"/>`;
+      drawingCanvas = warpImageMesh(drawingLayer.img, drawingLayer.w, drawingLayer.h, mapPoint, W, H, 24);
+      drawingSvg = `<image href="${drawingCanvas.toDataURL('image/png')}" x="0" y="0" width="${W}" height="${H}" opacity="${drawingOpacity}"/>`;
     }
 
     // ---- constellation stick figure + labeled stars — real-looking points,
@@ -1671,15 +1673,13 @@
     stars.forEach((s,i) => {
       const p = pxStars[i];
       markSvg += realStarSvg(p.x, p.y, s.mag, 'heroStarGlow', 1.35);
-      const r = Math.max(1.4, (7.6-s.mag)*0.9)*1.35;
-      markSvg += `<text x="${p.x.toFixed(1)}" y="${(p.y-r-8).toFixed(1)}" fill="${TEXT_TITLE}" font-size="13" text-anchor="middle" font-family="-apple-system,sans-serif" font-weight="600">${s.name}</text>`;
     });
 
     // ---- title + discreet sky position ----
     const posLabel = `RA ${formatRA(cra)}  Dec ${formatDec(cdec)}`;
     const titleSvg =
-      `<text x="${W/2}" y="70" fill="${TEXT_TITLE}" font-size="42" text-anchor="middle" font-family="-apple-system,sans-serif" font-weight="700">${title}</text>`+
-      `<text x="${W/2}" y="102" fill="${TEXT_MUTED}" font-size="15" text-anchor="middle" font-family="monospace" opacity="0.85">${posLabel}</text>`;
+      `<text x="${W/2}" y="78" fill="${TEXT_TITLE}" font-size="62" text-anchor="middle" font-family="-apple-system,sans-serif" font-weight="700">${title}</text>`+
+      `<text x="${W/2}" y="112" fill="${TEXT_MUTED}" font-size="15" text-anchor="middle" font-family="monospace" opacity="0.85">${posLabel}</text>`;
 
     // ---- discreet 2D barcode, bottom-right ----
     let qrSvg = '';
@@ -1731,11 +1731,26 @@
     const glowH = Math.min(skyH*0.35, 260);
     const horizonGlowSvg = `<rect x="0" y="${(skyBottomY-glowH).toFixed(1)}" width="${W}" height="${(glowH+2).toFixed(1)}" fill="url(#horizonGlow)"/>`;
 
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`+
-      defsSvg +
+    const svgOpen = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+    const full = svgOpen + defsSvg +
       `<rect width="${W}" height="${H}" fill="${NIGHT_BG}"/>`+
       horizonGlowSvg + fieldSvg + drawingSvg + mstSvg + markSvg + skylineSvg + titleSvg + qrSvg +
       `</svg>`;
+
+    // Split into "before" (background+stars) and "after" (everything above
+    // the drawing layer) SVG documents, PLUS the raw warped drawing canvas —
+    // used only for PNG export, which composites these three directly via
+    // Canvas 2D instead of rasterizing the combined SVG-with-embedded-image
+    // through an <img>. That path turned out to be unreliable for a large
+    // embedded raster specifically (present in the on-screen preview and the
+    // .svg download, silently missing from the .png export) — likely a size-
+    // dependent quirk of decoding a nested data-URI <image> when the outer
+    // SVG itself is loaded as an <img src="blob:...">. Direct canvas
+    // compositing sidesteps that path entirely.
+    const before = svgOpen + defsSvg + `<rect width="${W}" height="${H}" fill="${NIGHT_BG}"/>` + horizonGlowSvg + fieldSvg + `</svg>`;
+    const after = svgOpen + mstSvg + markSvg + skylineSvg + titleSvg + qrSvg + `</svg>`;
+
+    return { full, before, after, drawingCanvas, drawingOpacity };
   }
 
   // Re-renders just the "Matching sky region" chart from the already-computed
@@ -2071,6 +2086,7 @@
   const posterOverlay = document.getElementById('posterOverlay');
   const posterStatus = document.getElementById('posterStatus');
   let lastPosterSvg = '';
+  let lastPosterLayers = null;
 
   document.getElementById('posterBtn').addEventListener('click', () => {
     if(!lastBestMatch){ return; }
@@ -2090,7 +2106,8 @@
     const safeFileName = rawTitle.replace(/[^A-Za-z0-9_-]/g, '_') || 'Constellation';
     const mapUrl = VIEWER_BASE_URL + '?map=' + encodeURIComponent('../maps/' + safeFileName + '.json');
 
-    lastPosterSvg = buildPosterSvg(lastBestMatch, lastMstEdges, lastDrawingLayer, title, mapUrl, lastBgColor);
+    lastPosterLayers = buildPosterSvg(lastBestMatch, lastMstEdges, lastDrawingLayer, title, mapUrl, lastBgColor);
+    lastPosterSvg = lastPosterLayers.full;
     document.getElementById('posterPreviewWrap').style.display = '';
     document.getElementById('posterPreviewHolder').innerHTML = lastPosterSvg;
     document.getElementById('posterDownloadPngBtn').disabled = false;
@@ -2108,26 +2125,37 @@
     URL.revokeObjectURL(a.href);
   });
 
-  document.getElementById('posterDownloadPngBtn').addEventListener('click', () => {
-    if(!lastPosterSvg) return;
-    const img = new Image();
-    const svgBlob = new Blob([lastPosterSvg], {type:'image/svg+xml;charset=utf-8'});
-    const url = URL.createObjectURL(svgBlob);
-    img.onload = () => {
-      const c = document.createElement('canvas');
-      c.width = 1000; c.height = 1400;
-      const cx = c.getContext('2d');
-      cx.drawImage(img, 0, 0);
-      c.toBlob(blob => {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = (document.getElementById('posterTitle').value.trim() || 'poster') + '-poster.png';
-        a.click();
-        URL.revokeObjectURL(a.href);
-        URL.revokeObjectURL(url);
-      });
-    };
-    img.src = url;
+  function svgStringToImage(svgStr){
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(new Blob([svgStr], {type:'image/svg+xml;charset=utf-8'}));
+      img.onload = () => { resolve(img); URL.revokeObjectURL(url); };
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  document.getElementById('posterDownloadPngBtn').addEventListener('click', async () => {
+    if(!lastPosterLayers) return;
+    const { before, after, drawingCanvas, drawingOpacity } = lastPosterLayers;
+    const [beforeImg, afterImg] = await Promise.all([svgStringToImage(before), svgStringToImage(after)]);
+    const c = document.createElement('canvas');
+    c.width = 1000; c.height = 1400;
+    const cx = c.getContext('2d');
+    cx.drawImage(beforeImg, 0, 0, 1000, 1400);
+    if(drawingCanvas){
+      cx.globalAlpha = drawingOpacity;
+      cx.drawImage(drawingCanvas, 0, 0, 1000, 1400);
+      cx.globalAlpha = 1;
+    }
+    cx.drawImage(afterImg, 0, 0, 1000, 1400);
+    c.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = (document.getElementById('posterTitle').value.trim() || 'poster') + '-poster.png';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
   });
 })();
 </script>
