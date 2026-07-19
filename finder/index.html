@@ -1550,69 +1550,65 @@
     return `<rect x="0" y="${(baseline-16).toFixed(1)}" width="${W}" height="18" fill="#000000"/>` + shapes;
   }
 
-  function buildPosterSvg(match, mstEdges, drawingLayer, lat, lon, jd, title, mapUrl, bg){
+  function buildPosterSvg(match, mstEdges, drawingLayer, title, mapUrl, bg){
     // Always a real night sky, regardless of the source image's own background
     // color (a poster isn't a diagram — it should look like looking up at night).
     const NIGHT_BG = '#03050d';
     const TEXT_TITLE = '#f3f6ff', TEXT_MUTED = '#8f9bc2', TEXT_LABEL = '#b9c4e8';
     const stars = match.matchedStars;
-    const centerDec = stars.reduce((a,s)=>a+s.dec,0)/stars.length;
-    const centerRa = circularMeanDeg(stars.map(s=>s.ra));
-    // Corrects for patterns that culminate NORTH of the observer's zenith —
-    // without this, those would render rotated 180° relative to how they were
-    // originally sketched (confirmed as a real, visible problem: the drawing
-    // being recognizably upright matters more than the pattern's screen "up"
-    // always exactly equaling higher real altitude).
-    const flip = centerDec > lat;
 
-    const altAz = stars.map(s => raDecToAltAz(s.ra, s.dec, lat, lon, jd));
-    const centerAz = circularMeanDeg(altAz.map(p=>p.az));
-    const centerAlt = altAz.reduce((a,p)=>a+p.alt,0)/altAz.length;
-    const cosC = Math.max(0.2, Math.cos(degToRad(centerAlt)));
+    // Plain RA/Dec gnomonic projection centered on the pattern — exactly the
+    // same math as the "Matching sky region" chart (buildSkyChartSvg), which
+    // has never had an orientation problem: north is always up, matching
+    // fitScaleTranslate's no-rotation guarantee, so the drawing always comes
+    // out exactly as originally sketched. An earlier version of this function
+    // instead converted through Alt/Az at a chosen viewing moment, with a
+    // flip heuristic for one edge case — that broke down for patterns spread
+    // across a wide, high declination range near the pole (confirmed: it
+    // visibly distorted the layout, not just a clean rotation, and likely
+    // explains the drawing silently failing to warp too). RA/Dec projection
+    // has none of those edge cases.
+    let cra=0, cdec=0;
+    for(const s of stars){ cra+=s.ra; cdec+=s.dec; }
+    cra/=stars.length; cdec/=stars.length;
 
-    function toLocal(az,alt){
-      const dAz = (((az-centerAz+540)%360)-180) * cosC;
-      const x = dAz, y = alt-centerAlt;
-      return flip ? { x:-x, y:-y } : { x, y };
-    }
-    const localPts = altAz.map(p=>toLocal(p.az,p.alt));
-    const xs=localPts.map(p=>p.x), ys=localPts.map(p=>p.y);
+    const proj = stars.map(s => gnomonic(s.ra, s.dec, cra, cdec));
+    const xs = proj.map(p=>p.x), ys = proj.map(p=>p.y);
     const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+    const spanX = Math.max(maxX-minX, 0.02), spanY = Math.max(maxY-minY, 0.02);
     // Generous, mostly-fixed background margin: a poster should read as "a
-    // patch of sky", not a tight crop, regardless of how small the pattern is.
-    const patternSpan = Math.max(maxX-minX, maxY-minY, 6);
-    const halfDeg = patternSpan*0.55 + 26;
+    // wide open patch of sky", not a tight crop, regardless of how small the
+    // pattern is.
+    const pad = Math.max(spanX, spanY)*1.6 + 0.35;
+    const viewMinX=minX-pad, viewMaxX=maxX+pad, viewMinY=minY-pad, viewMaxY=maxY+pad;
 
     const W = 1000, H = 1400;
     const titleH = 150, skylineH = 170;
-    const skyH = H - titleH - skylineH;
+    const skyTop = titleH, skyH = H - titleH - skylineH;
 
-    // The pattern sits at the vertical MIDDLE of the sky area — a deliberate
-    // compositional choice, not tied to its literal real altitude (which would
-    // otherwise pin very-high-culminating patterns right at the top of the
-    // frame, and could even push the pattern/drawing off-canvas entirely).
-    const scale = Math.min(W/(halfDeg*2), skyH/(halfDeg*2)) * 0.96;
-    const skyCx = W/2, skyCy = titleH + skyH/2, skyBottomY = titleH + skyH;
-    function toPixel(p){ return { x: skyCx + p.x*scale, y: skyCy - p.y*scale }; }
+    const scale = Math.min(W/(viewMaxX-viewMinX), skyH/(viewMaxY-viewMinY)) * 0.98;
+    const ccx=(viewMinX+viewMaxX)/2, ccy=(viewMinY+viewMaxY)/2;
+    function toPixel(p){ return { x: W/2 + (p.x-ccx)*scale, y: skyTop + skyH/2 - (p.y-ccy)*scale }; }
 
-    // The star field must fill the ENTIRE sky rectangle edge-to-edge — its
-    // bounds come from the frame's own actual angular extent at this scale,
-    // not from halfDeg (which only sizes the pattern + its padding), otherwise
-    // whichever axis isn't the tightest constraint is left with an empty gap.
-    const shownHalfWDeg = (W/2)/scale, shownHalfHDeg = (skyH/2)/scale;
+    const halfWDeg = Math.atan(Math.max(Math.abs(viewMinX),Math.abs(viewMaxX)))*180/Math.PI / Math.max(0.15, Math.cos(degToRad(cdec)));
+    const halfHDeg = Math.atan(Math.max(Math.abs(viewMinY),Math.abs(viewMaxY)))*180/Math.PI;
 
     // ---- background: bright, naked-eye-plausible field stars only — the full
     // ~24k-star catalog reads as an overwhelming haze at this scale, not like a
     // real dark sky. Labeled only where a star has a real common name. ----
     const field = window.FIELD_STARS || [];
+    const raPad = halfWDeg*1.05+2, decPad = halfHDeg*1.05+2;
     let fieldSvg = '';
     for(const [ra,dec,mag,name] of field){
       if(mag > 6.2) continue;
-      const p = raDecToAltAz(ra, dec, lat, lon, jd);
-      const local = toLocal(p.az, p.alt);
-      if(Math.abs(local.x) > shownHalfWDeg*1.04 || Math.abs(local.y) > shownHalfHDeg*1.04) continue;
-      const px = toPixel(local);
-      if(px.x<-10||px.x>W+10||px.y<titleH-10||px.y>titleH+skyH+10) continue;
+      const ddec = dec-cdec;
+      if(Math.abs(ddec) > decPad) continue;
+      let dra = (((ra-cra+540)%360)-180) * Math.cos(degToRad(cdec));
+      if(Math.abs(dra) > raPad) continue;
+      const p = gnomonic(ra, dec, cra, cdec);
+      if(!p) continue;
+      const px = toPixel(p);
+      if(px.x<-10||px.x>W+10||px.y<skyTop-10||px.y>skyTop+skyH+10) continue;
       fieldSvg += realStarSvg(px.x, px.y, mag, 'starGlow');
       if(name){
         const r = Math.max(1.4, (7.6-mag)*0.9);
@@ -1627,8 +1623,8 @@
         const tgt = { x, y: -y };
         const g = applyInverseTransform(tgt, match.fit);
         const { ra, dec } = inverseGnomonic(g.x, g.y, match.tangentRa, match.tangentDec);
-        const p = raDecToAltAz(ra, dec, lat, lon, jd);
-        return toPixel(toLocal(p.az, p.alt));
+        const p2 = gnomonic(ra, dec, cra, cdec);
+        return p2 ? toPixel(p2) : { x:-1e5, y:-1e5 };
       }
       const warped = warpImageMesh(drawingLayer.img, drawingLayer.w, drawingLayer.h, mapPoint, W, H, 24);
       drawingSvg = `<image href="${warped.toDataURL('image/png')}" x="0" y="0" width="${W}" height="${H}" opacity="0.85"/>`;
@@ -1636,7 +1632,7 @@
 
     // ---- constellation stick figure + labeled stars — real-looking points,
     // connected by a faint silvery guide line rather than a bold diagram color ----
-    const pxStars = altAz.map(p => toPixel(toLocal(p.az,p.alt)));
+    const pxStars = stars.map(s => toPixel(gnomonic(s.ra, s.dec, cra, cdec)));
     let mstSvg = '';
     for(const [a,b] of mstEdges||[]){
       mstSvg += `<line x1="${pxStars[a].x.toFixed(1)}" y1="${pxStars[a].y.toFixed(1)}" x2="${pxStars[b].x.toFixed(1)}" y2="${pxStars[b].y.toFixed(1)}" stroke="${NIGHT_BG}" stroke-width="4" opacity="0.7" stroke-linecap="round"/>`;
@@ -1653,7 +1649,7 @@
     });
 
     // ---- title + discreet sky position ----
-    const posLabel = `RA ${formatRA(centerRa)}  Dec ${formatDec(centerDec)}`;
+    const posLabel = `RA ${formatRA(cra)}  Dec ${formatDec(cdec)}`;
     const titleSvg =
       `<text x="${W/2}" y="70" fill="${TEXT_TITLE}" font-size="42" text-anchor="middle" font-family="-apple-system,sans-serif" font-weight="700">${title}</text>`+
       `<text x="${W/2}" y="102" fill="${TEXT_MUTED}" font-size="15" text-anchor="middle" font-family="monospace" opacity="0.85">${posLabel}</text>`;
@@ -1681,6 +1677,7 @@
 
     // ---- shade horizon: houses and trees, drawn last so they occlude
     // whatever sky/pattern content would otherwise show through near the bottom ----
+    const skyBottomY = skyTop + skyH;
     const skylineSvg = buildSkylineSvg(W, H, skyBottomY);
 
     const defsSvg = `<defs>`+
@@ -2063,26 +2060,15 @@
     const rawTitle = document.getElementById('posterTitle').value.trim() || 'Constellation';
     const title = escapeXml(rawTitle);
 
-    let lat = parseFloat(document.getElementById('obsLat').value);
-    let lon = parseFloat(document.getElementById('obsLon').value);
-    if(isNaN(lat)) lat = 41.12;
-    if(isNaN(lon)) lon = 16.87;
-
-    const stars = lastBestMatch.matchedStars;
-    const centerRa = circularMeanDeg(stars.map(s=>s.ra));
-    const now = new Date();
-    const transitHourUTC = computeTransitUTCHour(centerRa, lon, now.getFullYear(), now.getMonth()+1, now.getDate());
-    const jd = julianDate(now.getFullYear(), now.getMonth()+1, now.getDate(), transitHourUTC);
-
     const safeFileName = rawTitle.replace(/[^A-Za-z0-9_-]/g, '_') || 'Constellation';
     const mapUrl = VIEWER_BASE_URL + '?map=' + encodeURIComponent('../maps/' + safeFileName + '.json');
 
-    lastPosterSvg = buildPosterSvg(lastBestMatch, lastMstEdges, lastDrawingLayer, lat, lon, jd, title, mapUrl, lastBgColor);
+    lastPosterSvg = buildPosterSvg(lastBestMatch, lastMstEdges, lastDrawingLayer, title, mapUrl, lastBgColor);
     document.getElementById('posterPreviewWrap').style.display = '';
     document.getElementById('posterPreviewHolder').innerHTML = lastPosterSvg;
     document.getElementById('posterDownloadPngBtn').disabled = false;
     document.getElementById('posterDownloadSvgBtn').disabled = false;
-    posterStatus.textContent = `Rendered at ${lat.toFixed(2)}°, ${lon.toFixed(2)}° — at its highest point tonight, drawn upright.`;
+    posterStatus.textContent = 'Rendered — drawn exactly as sketched, north up.';
   });
 
   document.getElementById('posterDownloadSvgBtn').addEventListener('click', () => {
