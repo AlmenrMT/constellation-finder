@@ -1512,35 +1512,61 @@
   // have a skyline in front of it. Purely decorative and randomized per
   // generation; drawn last so it naturally occludes whatever sky/pattern
   // content would otherwise show through it near the bottom.
+  // A varied town skyline silhouette — round bushes, layered pine trees,
+  // gabled houses (with occasional chimney), and an occasional clock tower —
+  // pure black shapes, no window detail (matches the reference: a clean flat
+  // silhouette, not a lit-up diagram).
   function buildSkylineSvg(W, H, topY){
     const baseline = H;
     const stripH = H - topY;
     let shapes = '';
-    let x = -20;
+    let x = -20, sinceTower = 999;
     while(x < W+20){
-      if(Math.random() < 0.4){
-        const treeW = 26+Math.random()*26, treeH = stripH*(0.5+Math.random()*0.4);
-        const cx = x+treeW/2, trunkW = Math.max(4, treeW*0.14);
-        shapes += `<rect x="${(cx-trunkW/2).toFixed(1)}" y="${(baseline-treeH*0.22).toFixed(1)}" width="${trunkW.toFixed(1)}" height="${(treeH*0.22+2).toFixed(1)}" fill="#000000"/>`;
-        shapes += `<ellipse cx="${cx.toFixed(1)}" cy="${(baseline-treeH*0.62).toFixed(1)}" rx="${(treeW/2).toFixed(1)}" ry="${(treeH*0.5).toFixed(1)}" fill="#000000"/>`;
-        x += treeW + 8 + Math.random()*14;
+      const roll = Math.random();
+      if(roll < 0.22){
+        // round bush/tree
+        const tw = 30+Math.random()*22, th = stripH*(0.22+Math.random()*0.18);
+        const cx = x+tw/2;
+        shapes += `<ellipse cx="${cx.toFixed(1)}" cy="${(baseline-th*0.5).toFixed(1)}" rx="${(tw/2).toFixed(1)}" ry="${(th*0.55+2).toFixed(1)}" fill="#000000"/>`;
+        x += tw + 6 + Math.random()*10;
+      } else if(roll < 0.42){
+        // layered pine/conifer: three stacked, narrowing triangles
+        const tw = 24+Math.random()*16, th = stripH*(0.4+Math.random()*0.3);
+        const cx = x+tw/2;
+        for(let t=0; t<3; t++){
+          const frac = t/3;
+          const tierW = tw*(1-frac*0.55);
+          const tierTop = baseline - th*(0.3+frac*0.68) - th*0.24;
+          const tierBot = baseline - th*(0.22+frac*0.62);
+          shapes += `<polygon points="${(cx-tierW/2).toFixed(1)},${tierBot.toFixed(1)} ${cx.toFixed(1)},${tierTop.toFixed(1)} ${(cx+tierW/2).toFixed(1)},${tierBot.toFixed(1)}" fill="#000000"/>`;
+        }
+        x += tw + 8 + Math.random()*12;
+      } else if(sinceTower > 5 && roll < 0.5){
+        // an occasional clock tower — the one tall landmark on the skyline
+        sinceTower = 0;
+        const tw = 40+Math.random()*8, th = stripH*(0.8+Math.random()*0.15);
+        const topYb = baseline-th, capH = tw*0.65;
+        shapes += `<rect x="${x.toFixed(1)}" y="${(topYb+capH).toFixed(1)}" width="${tw.toFixed(1)}" height="${(th-capH+2).toFixed(1)}" fill="#000000"/>`;
+        shapes += `<polygon points="${x.toFixed(1)},${(topYb+capH).toFixed(1)} ${(x+tw/2).toFixed(1)},${topYb.toFixed(1)} ${(x+tw).toFixed(1)},${(topYb+capH).toFixed(1)}" fill="#000000"/>`;
+        shapes += `<circle cx="${(x+tw/2).toFixed(1)}" cy="${(topYb+capH*1.5).toFixed(1)}" r="${(tw*0.2).toFixed(1)}" fill="none" stroke="#a99a86" stroke-width="1.4" opacity="0.75"/>`;
+        x += tw + 10 + Math.random()*14;
       } else {
-        const bW = 60+Math.random()*80, bH = stripH*(0.3+Math.random()*0.6);
+        sinceTower++;
+        // gabled or flat-roof house, occasionally with a chimney
+        const bW = 50+Math.random()*55, bH = stripH*(0.28+Math.random()*0.4);
         const topYb = baseline-bH;
-        if(Math.random()<0.45){
-          const peakH = bH*0.22;
+        if(Math.random()<0.6){
+          const peakH = bH*0.26;
           shapes += `<polygon points="${x.toFixed(1)},${(topYb+peakH).toFixed(1)} ${(x+bW/2).toFixed(1)},${topYb.toFixed(1)} ${(x+bW).toFixed(1)},${(topYb+peakH).toFixed(1)} ${(x+bW).toFixed(1)},${baseline.toFixed(1)} ${x.toFixed(1)},${baseline.toFixed(1)}" fill="#000000"/>`;
+          if(Math.random()<0.5){
+            const chimW=6+Math.random()*3, chimH=bH*0.22;
+            const chimX = x+bW*(0.65+Math.random()*0.2);
+            shapes += `<rect x="${chimX.toFixed(1)}" y="${(topYb+peakH*0.5-chimH).toFixed(1)}" width="${chimW.toFixed(1)}" height="${(chimH+peakH*0.5+2).toFixed(1)}" fill="#000000"/>`;
+          }
         } else {
           shapes += `<rect x="${x.toFixed(1)}" y="${topYb.toFixed(1)}" width="${bW.toFixed(1)}" height="${(bH+2).toFixed(1)}" fill="#000000"/>`;
         }
-        const cols = Math.max(1, Math.floor(bW/24)), rows = Math.max(1, Math.floor(bH/26));
-        for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
-          if(Math.random()<0.35){
-            const wx=x+10+c*22, wy=topYb+bH*0.28+r*24;
-            if(wy < baseline-10 && wx < x+bW-14) shapes += `<rect x="${wx.toFixed(1)}" y="${wy.toFixed(1)}" width="7" height="9" fill="#20264a" opacity="0.85"/>`;
-          }
-        }
-        x += bW + 6 + Math.random()*10;
+        x += bW + 5 + Math.random()*10;
       }
     }
     // Only a thin ground line at the very bottom (to close small gaps between
@@ -1576,10 +1602,11 @@
     const xs = proj.map(p=>p.x), ys = proj.map(p=>p.y);
     const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
     const spanX = Math.max(maxX-minX, 0.02), spanY = Math.max(maxY-minY, 0.02);
-    // Generous, mostly-fixed background margin: a poster should read as "a
-    // wide open patch of sky", not a tight crop, regardless of how small the
-    // pattern is.
-    const pad = Math.max(spanX, spanY)*1.6 + 0.35;
+    // The constellation is the subject of the poster — it should read as
+    // clearly prominent, not lost in a wide field of background sky. Modest,
+    // mostly-fixed padding (similar to the interactive chart's own framing),
+    // not the much wider margin an earlier version used.
+    const pad = Math.max(spanX, spanY)*0.55 + 0.1;
     const viewMinX=minX-pad, viewMaxX=maxX+pad, viewMinY=minY-pad, viewMaxY=maxY+pad;
 
     const W = 1000, H = 1400;
