@@ -1558,21 +1558,22 @@
     const stars = match.matchedStars;
     const centerDec = stars.reduce((a,s)=>a+s.dec,0)/stars.length;
     const centerRa = circularMeanDeg(stars.map(s=>s.ra));
+    // Corrects for patterns that culminate NORTH of the observer's zenith —
+    // without this, those would render rotated 180° relative to how they were
+    // originally sketched (confirmed as a real, visible problem: the drawing
+    // being recognizably upright matters more than the pattern's screen "up"
+    // always exactly equaling higher real altitude).
+    const flip = centerDec > lat;
 
     const altAz = stars.map(s => raDecToAltAz(s.ra, s.dec, lat, lon, jd));
     const centerAz = circularMeanDeg(altAz.map(p=>p.az));
     const centerAlt = altAz.reduce((a,p)=>a+p.alt,0)/altAz.length;
     const cosC = Math.max(0.2, Math.cos(degToRad(centerAlt)));
 
-    // "Up" in the image is always higher real altitude, never flipped — this is
-    // what guarantees the top of the poster is always the highest point in the
-    // sky. (The one thing this can't also guarantee is the drawing's own "up"
-    // matching its original sketch orientation — only possible in the rare case
-    // where a pattern culminates north of the observer's zenith. Altitude
-    // correctness wins there.)
     function toLocal(az,alt){
       const dAz = (((az-centerAz+540)%360)-180) * cosC;
-      return { x: dAz, y: alt-centerAlt };
+      const x = dAz, y = alt-centerAlt;
+      return flip ? { x:-x, y:-y } : { x, y };
     }
     const localPts = altAz.map(p=>toLocal(p.az,p.alt));
     const xs=localPts.map(p=>p.x), ys=localPts.map(p=>p.y);
@@ -1583,35 +1584,35 @@
     const halfDeg = patternSpan*0.55 + 26;
 
     const W = 1000, H = 1400;
-    const titleH = 150, skylineH = 180;
+    const titleH = 150, skylineH = 170;
     const skyH = H - titleH - skylineH;
 
-    // Vertical framing is anchored to the real horizon (altitude 0) at the
-    // bottom of the sky area, not centered on the pattern — this is what
-    // actually produces "fairly high in the sky, horizon below it": the
-    // pattern lands wherever its own real transit altitude puts it above
-    // that horizon, rather than always being pinned to the middle.
-    const topAltDeg = centerAlt + halfDeg*1.15 + 8;
-    const bottomAltDeg = Math.min(0, centerAlt - halfDeg*1.3);
-    const altSpanDeg = Math.max(topAltDeg - bottomAltDeg, 20);
+    // The pattern sits at the vertical MIDDLE of the sky area — a deliberate
+    // compositional choice, not tied to its literal real altitude (which would
+    // otherwise pin very-high-culminating patterns right at the top of the
+    // frame, and could even push the pattern/drawing off-canvas entirely).
+    const scale = Math.min(W/(halfDeg*2), skyH/(halfDeg*2)) * 0.96;
+    const skyCx = W/2, skyCy = titleH + skyH/2, skyBottomY = titleH + skyH;
+    function toPixel(p){ return { x: skyCx + p.x*scale, y: skyCy - p.y*scale }; }
 
-    const scale = Math.min(W/(halfDeg*2), skyH/altSpanDeg) * 0.96;
-    const skyCx = W/2, skyBottomY = titleH + skyH;
-    function toPixel(p){
-      const alt = p.y + centerAlt;
-      return { x: skyCx + p.x*scale, y: skyBottomY - (alt-bottomAltDeg)*scale };
-    }
+    // The star field must fill the ENTIRE sky rectangle edge-to-edge — its
+    // bounds come from the frame's own actual angular extent at this scale,
+    // not from halfDeg (which only sizes the pattern + its padding), otherwise
+    // whichever axis isn't the tightest constraint is left with an empty gap.
+    const shownHalfWDeg = (W/2)/scale, shownHalfHDeg = (skyH/2)/scale;
 
-    // ---- background: every visible field star, labeled only where it has a real name ----
+    // ---- background: bright, naked-eye-plausible field stars only — the full
+    // ~24k-star catalog reads as an overwhelming haze at this scale, not like a
+    // real dark sky. Labeled only where a star has a real common name. ----
     const field = window.FIELD_STARS || [];
     let fieldSvg = '';
     for(const [ra,dec,mag,name] of field){
+      if(mag > 6.2) continue;
       const p = raDecToAltAz(ra, dec, lat, lon, jd);
-      if(p.alt < bottomAltDeg-5 || p.alt > topAltDeg+8) continue;
-      let dAz = (((p.az-centerAz+540)%360)-180);
-      if(Math.abs(dAz*cosC) > halfDeg*1.1+5) continue;
-      const px = toPixel(toLocal(p.az, p.alt));
-      if(px.x<-20||px.x>W+20||px.y<titleH-20||px.y>skyBottomY+20) continue;
+      const local = toLocal(p.az, p.alt);
+      if(Math.abs(local.x) > shownHalfWDeg*1.04 || Math.abs(local.y) > shownHalfHDeg*1.04) continue;
+      const px = toPixel(local);
+      if(px.x<-10||px.x>W+10||px.y<titleH-10||px.y>titleH+skyH+10) continue;
       fieldSvg += realStarSvg(px.x, px.y, mag, 'starGlow');
       if(name){
         const r = Math.max(1.4, (7.6-mag)*0.9);
@@ -2081,7 +2082,7 @@
     document.getElementById('posterPreviewHolder').innerHTML = lastPosterSvg;
     document.getElementById('posterDownloadPngBtn').disabled = false;
     document.getElementById('posterDownloadSvgBtn').disabled = false;
-    posterStatus.textContent = `Rendered at ${lat.toFixed(2)}°, ${lon.toFixed(2)}° — at its highest point tonight, top of image = highest in the sky.`;
+    posterStatus.textContent = `Rendered at ${lat.toFixed(2)}°, ${lon.toFixed(2)}° — at its highest point tonight, drawn upright.`;
   });
 
   document.getElementById('posterDownloadSvgBtn').addEventListener('click', () => {
