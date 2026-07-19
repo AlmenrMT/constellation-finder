@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="stars.js"></script>
 <script src="field.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <style>
   :root{
     --bg:#1b1c20; --panel:#26272c; --border:#3a3b41; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe;
@@ -47,7 +48,7 @@
     border-radius:8px; overflow:hidden; min-height:180px; display:flex; align-items:center; justify-content:center;
   }
   .canvasWrap.drag{outline:2px dashed var(--accent); outline-offset:-2px;}
-  canvas, #chartHolder svg{max-width:100%; height:auto; display:block;}
+  canvas, #chartHolder svg, #posterPreviewHolder svg{max-width:100%; height:auto; display:block;}
   .dropHint{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column; gap:6px; color:var(--muted); font-size:12px; pointer-events:none; padding:12px; text-align:center;}
   .stats{margin-top:10px; font-size:11px; color:var(--muted); line-height:1.5; text-align:left;}
   .stats b{color:var(--text);}
@@ -94,6 +95,9 @@
     </div>
     <div class="btnrow">
       <button id="downloadJson">Download map file (.json)</button>
+    </div>
+    <div class="btnrow">
+      <button id="posterBtn">Create poster…</button>
     </div>
     <div class="stats" id="pathStats"></div>
     <div class="candidateList" id="candidateList"></div>
@@ -146,6 +150,33 @@
     <div class="btnrow">
       <button class="primary" id="autoUseBtn" disabled>Use this pattern</button>
       <button id="autoResetBtn" disabled>Reset to auto-detected</button>
+    </div>
+  </div>
+</div>
+
+<div id="posterOverlay" style="display:none; position:fixed; inset:0; background:rgba(10,10,12,0.8); z-index:30; align-items:center; justify-content:center; padding:20px; overflow-y:auto;">
+  <div class="panel" style="max-width:520px; width:100%; margin:20px 0;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h2 style="margin:0; font-size:16px;">Create poster</h2>
+      <button id="posterCloseBtn">Close ✕</button>
+    </div>
+    <label style="display:block; font-size:12px; color:var(--muted); margin:8px 0 4px;">Poster title</label>
+    <input type="text" id="posterTitle" placeholder="e.g. Anton" style="width:100%; background:#1f2024; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px;">
+    <p class="hint" style="color:var(--muted); font-size:11px; margin:6px 0 0;">
+      The QR code links to <code>viewer/?map=../maps/&lt;title&gt;.json</code> — upload the exported map
+      file under that exact name to <code>maps/</code> (and add it to <code>manifest.json</code>) for the
+      code to resolve once scanned.
+    </p>
+    <div class="btnrow">
+      <button class="primary" id="posterGenBtn">Generate</button>
+    </div>
+    <div class="stats" id="posterStatus"></div>
+    <div class="canvasWrap" id="posterPreviewWrap" style="display:none; margin-top:12px; background:none;">
+      <div id="posterPreviewHolder" style="max-width:340px; margin:0 auto;"></div>
+    </div>
+    <div class="btnrow">
+      <button class="primary" id="posterDownloadPngBtn" disabled>Download poster PNG</button>
+      <button id="posterDownloadSvgBtn" disabled>Download poster SVG</button>
     </div>
   </div>
 </div>
@@ -214,7 +245,13 @@
   let lastBestMatch = null;
   let lastDrawingLayer = null;
   let lastBgColor = null;
+  let lastLoadedFileName = '';
   const FINDER_SIZE = 720;
+
+  function stripExtension(name){
+    const i = name.lastIndexOf('.');
+    return i>0 ? name.slice(0,i) : name;
+  }
 
   // Picks a light-on-dark or dark-on-light palette so grid/field-star/text
   // colors stay legible whatever the sampled background color turns out to be.
@@ -263,6 +300,7 @@
 
   function loadFile(file){
     if(!file || !file.type.startsWith('image/')) return;
+    lastLoadedFileName = stripExtension(file.name);
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => { loadImageToCanvas(img); URL.revokeObjectURL(url); };
@@ -680,6 +718,8 @@
       ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
       ctx.fill();
     }
+    const photoFile = document.getElementById('autoPhotoInput').files[0];
+    if(photoFile) lastLoadedFileName = stripExtension(photoFile.name);
     const composite = new Image();
     composite.onload = () => { loadImageToCanvas(composite); autoOverlay.style.display = 'none'; };
     composite.src = c.toDataURL('image/png');
@@ -1444,6 +1484,135 @@
       `</svg>`;
   }
 
+  // ---------- poster ----------
+  // Renders the constellation "right side up" at the moment its center RA
+  // transits the observer's meridian. At that exact instant the parallactic
+  // angle is 0° or 180° (never anything in between) — the pattern's natural
+  // "up = toward the north celestial pole" orientation either exactly
+  // coincides with the viewer's "up = toward zenith" (when the pattern
+  // culminates SOUTH of zenith, i.e. centerDec < observer lat) or is exactly
+  // flipped (when it culminates NORTH of zenith, centerDec > lat — true for
+  // e.g. circumpolar northern patterns seen from mid-latitudes). We detect
+  // which case applies and correct for the flip, so the poster comes out
+  // upright either way instead of only in the common case.
+  function buildPosterSvg(match, mstEdges, drawingLayer, lat, lon, jd, title, mapUrl, bg){
+    const pal = paletteFor(bg);
+    const stars = match.matchedStars;
+    const centerDec = stars.reduce((a,s)=>a+s.dec,0)/stars.length;
+    const centerRa = circularMeanDeg(stars.map(s=>s.ra));
+    const flip = centerDec > lat;
+
+    const altAz = stars.map(s => raDecToAltAz(s.ra, s.dec, lat, lon, jd));
+    const centerAz = circularMeanDeg(altAz.map(p=>p.az));
+    const centerAlt = altAz.reduce((a,p)=>a+p.alt,0)/altAz.length;
+    const cosC = Math.max(0.2, Math.cos(degToRad(centerAlt)));
+
+    function toLocal(az,alt){
+      const dAz = (((az-centerAz+540)%360)-180) * cosC;
+      const x = dAz, y = alt-centerAlt;
+      return flip ? { x:-x, y:-y } : { x, y };
+    }
+    const localPts = altAz.map(p=>toLocal(p.az,p.alt));
+    const xs=localPts.map(p=>p.x), ys=localPts.map(p=>p.y);
+    const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
+    // Generous, mostly-fixed background margin: a poster should read as "a
+    // patch of sky", not a tight crop, regardless of how small the pattern is.
+    const patternSpan = Math.max(maxX-minX, maxY-minY, 6);
+    const halfDeg = patternSpan*0.55 + 26;
+
+    const W = 1000, H = 1400;
+    const titleH = 150, footerPad = 40;
+    const skyH = H - titleH - footerPad;
+    const scale = Math.min(W/(halfDeg*2), skyH/(halfDeg*2)) * 0.96;
+    const skyCx = W/2, skyCy = titleH + skyH/2;
+    function toPixel(p){ return { x: skyCx + p.x*scale, y: skyCy - p.y*scale }; }
+
+    // ---- background: every visible field star, labeled only where it has a real name ----
+    const field = window.FIELD_STARS || [];
+    const azPad = halfDeg/cosC*1.05+3, altPad = halfDeg*1.05+3;
+    let fieldSvg = '';
+    for(const [ra,dec,mag,name] of field){
+      const p = raDecToAltAz(ra, dec, lat, lon, jd);
+      if(p.alt < -2) continue;
+      const dAlt = p.alt - centerAlt;
+      if(Math.abs(dAlt) > altPad) continue;
+      let dAz = (((p.az-centerAz+540)%360)-180);
+      if(Math.abs(dAz*cosC) > azPad) continue;
+      const px = toPixel(toLocal(p.az, p.alt));
+      if(px.x<-20||px.x>W+20||px.y<titleH-20||px.y>H-footerPad+20) continue;
+      const r = Math.max(0.4, (7.5-mag)*0.55);
+      const op = Math.max(0.3, Math.min(0.95, (7.5-mag)/7));
+      fieldSvg += `<circle cx="${px.x.toFixed(1)}" cy="${px.y.toFixed(1)}" r="${r.toFixed(2)}" fill="${pal.fieldStar}" opacity="${op.toFixed(2)}"/>`;
+      if(name){
+        fieldSvg += `<text x="${(px.x+r+3).toFixed(1)}" y="${(px.y+3).toFixed(1)}" fill="${pal.gridLabel}" font-size="11" font-family="-apple-system,sans-serif">${name}</text>`;
+      }
+    }
+
+    // ---- the source drawing, mesh-warped the same way as the live finder chart ----
+    let drawingSvg = '';
+    if(drawingLayer && drawingLayer.img){
+      function mapPoint(x,y){
+        const tgt = { x, y: -y };
+        const g = applyInverseTransform(tgt, match.fit);
+        const { ra, dec } = inverseGnomonic(g.x, g.y, match.tangentRa, match.tangentDec);
+        const p = raDecToAltAz(ra, dec, lat, lon, jd);
+        return toPixel(toLocal(p.az, p.alt));
+      }
+      const warped = warpImageMesh(drawingLayer.img, drawingLayer.w, drawingLayer.h, mapPoint, W, H, 24);
+      drawingSvg = `<image href="${warped.toDataURL('image/png')}" x="0" y="0" width="${W}" height="${H}" opacity="0.85"/>`;
+    }
+
+    // ---- constellation stick figure + labeled stars ----
+    const pxStars = altAz.map(p => toPixel(toLocal(p.az,p.alt)));
+    let mstSvg = '';
+    for(const [a,b] of mstEdges||[]){
+      mstSvg += `<line x1="${pxStars[a].x.toFixed(1)}" y1="${pxStars[a].y.toFixed(1)}" x2="${pxStars[b].x.toFixed(1)}" y2="${pxStars[b].y.toFixed(1)}" stroke="${pal.bgFill}" stroke-width="4.5" opacity="0.85" stroke-linecap="round"/>`;
+    }
+    for(const [a,b] of mstEdges||[]){
+      mstSvg += `<line x1="${pxStars[a].x.toFixed(1)}" y1="${pxStars[a].y.toFixed(1)}" x2="${pxStars[b].x.toFixed(1)}" y2="${pxStars[b].y.toFixed(1)}" stroke="#ffd76a" stroke-width="1.8" opacity="0.9"/>`;
+    }
+    let markSvg = '';
+    stars.forEach((s,i) => {
+      const p = pxStars[i];
+      const r = Math.max(3, (6.5-s.mag)*1.4);
+      markSvg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${(r+4).toFixed(1)}" fill="#ffd76a" opacity="0.2"/>`;
+      markSvg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r.toFixed(1)}" fill="#fffbe8" stroke="#ffd76a" stroke-width="1.4"/>`;
+      markSvg += `<text x="${p.x.toFixed(1)}" y="${(p.y-r-7).toFixed(1)}" fill="#ffe9a8" font-size="13" text-anchor="middle" font-family="-apple-system,sans-serif" font-weight="600">${s.name}</text>`;
+    });
+
+    // ---- title + discreet sky position ----
+    const posLabel = `RA ${formatRA(centerRa)}  Dec ${formatDec(centerDec)}`;
+    const titleSvg =
+      `<text x="${W/2}" y="70" fill="${pal.title}" font-size="42" text-anchor="middle" font-family="-apple-system,sans-serif" font-weight="700">${title}</text>`+
+      `<text x="${W/2}" y="102" fill="${pal.subtitle}" font-size="15" text-anchor="middle" font-family="monospace" opacity="0.85">${posLabel}</text>`;
+
+    // ---- discreet 2D barcode, bottom-right ----
+    let qrSvg = '';
+    if(mapUrl && window.qrcode){
+      const qr = qrcode(0, 'M');
+      qr.addData(mapUrl);
+      qr.make();
+      const count = qr.getModuleCount();
+      const qrSize = 92, pad = 8;
+      const cell = qrSize/count;
+      const boxX = W-qrSize-pad*2-28, boxY = H-qrSize-pad*2-28;
+      qrSvg += `<rect x="${boxX}" y="${boxY}" width="${qrSize+pad*2}" height="${qrSize+pad*2}" rx="6" fill="#f4f4f2" opacity="0.92"/>`;
+      for(let r=0;r<count;r++){
+        for(let c=0;c<count;c++){
+          if(qr.isDark(r,c)){
+            qrSvg += `<rect x="${(boxX+pad+c*cell).toFixed(2)}" y="${(boxY+pad+r*cell).toFixed(2)}" width="${(cell+0.5).toFixed(2)}" height="${(cell+0.5).toFixed(2)}" fill="#0b0d12"/>`;
+          }
+        }
+      }
+      qrSvg += `<text x="${boxX+qrSize/2+pad}" y="${boxY-6}" fill="${pal.subtitle}" font-size="9" text-anchor="middle" font-family="-apple-system,sans-serif" opacity="0.7">view in AR</text>`;
+    }
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`+
+      `<rect width="${W}" height="${H}" fill="${pal.bgFill}"/>`+
+      fieldSvg + drawingSvg + mstSvg + markSvg + titleSvg + qrSvg +
+      `</svg>`;
+  }
+
   // Re-renders just the "Matching sky region" chart from the already-computed
   // match — used both right after a search completes and whenever the zoom
   // slider moves, so zooming never re-runs point detection/star matching.
@@ -1760,6 +1929,85 @@
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = 'constellation-match.png';
+        a.click();
+        URL.revokeObjectURL(a.href);
+        URL.revokeObjectURL(url);
+      });
+    };
+    img.src = url;
+  });
+
+  // ---------- poster wiring ----------
+  const VIEWER_BASE_URL = 'https://almenrmt.github.io/constellation-finder/viewer/';
+  function escapeXml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+  }
+
+  const posterOverlay = document.getElementById('posterOverlay');
+  const posterStatus = document.getElementById('posterStatus');
+  let lastPosterSvg = '';
+
+  document.getElementById('posterBtn').addEventListener('click', () => {
+    if(!lastBestMatch){ return; }
+    const titleInput = document.getElementById('posterTitle');
+    if(!titleInput.value) titleInput.value = lastLoadedFileName || '';
+    posterOverlay.style.display = 'flex';
+  });
+  document.getElementById('posterCloseBtn').addEventListener('click', () => {
+    posterOverlay.style.display = 'none';
+  });
+
+  document.getElementById('posterGenBtn').addEventListener('click', () => {
+    if(!lastBestMatch){ posterStatus.textContent = 'Find a constellation match first.'; return; }
+    const rawTitle = document.getElementById('posterTitle').value.trim() || 'Constellation';
+    const title = escapeXml(rawTitle);
+
+    let lat = parseFloat(document.getElementById('obsLat').value);
+    let lon = parseFloat(document.getElementById('obsLon').value);
+    if(isNaN(lat)) lat = 41.12;
+    if(isNaN(lon)) lon = 16.87;
+
+    const stars = lastBestMatch.matchedStars;
+    const centerRa = circularMeanDeg(stars.map(s=>s.ra));
+    const now = new Date();
+    const transitHourUTC = computeTransitUTCHour(centerRa, lon, now.getFullYear(), now.getMonth()+1, now.getDate());
+    const jd = julianDate(now.getFullYear(), now.getMonth()+1, now.getDate(), transitHourUTC);
+
+    const safeFileName = rawTitle.replace(/[^A-Za-z0-9_-]/g, '_') || 'Constellation';
+    const mapUrl = VIEWER_BASE_URL + '?map=' + encodeURIComponent('../maps/' + safeFileName + '.json');
+
+    lastPosterSvg = buildPosterSvg(lastBestMatch, lastMstEdges, lastDrawingLayer, lat, lon, jd, title, mapUrl, lastBgColor);
+    document.getElementById('posterPreviewWrap').style.display = '';
+    document.getElementById('posterPreviewHolder').innerHTML = lastPosterSvg;
+    document.getElementById('posterDownloadPngBtn').disabled = false;
+    document.getElementById('posterDownloadSvgBtn').disabled = false;
+    posterStatus.textContent = `Rendered at ${lat.toFixed(2)}°, ${lon.toFixed(2)}° — upright at local transit time.`;
+  });
+
+  document.getElementById('posterDownloadSvgBtn').addEventListener('click', () => {
+    if(!lastPosterSvg) return;
+    const blob = new Blob([lastPosterSvg], {type:'image/svg+xml'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (document.getElementById('posterTitle').value.trim() || 'poster') + '-poster.svg';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+
+  document.getElementById('posterDownloadPngBtn').addEventListener('click', () => {
+    if(!lastPosterSvg) return;
+    const img = new Image();
+    const svgBlob = new Blob([lastPosterSvg], {type:'image/svg+xml;charset=utf-8'});
+    const url = URL.createObjectURL(svgBlob);
+    img.onload = () => {
+      const c = document.createElement('canvas');
+      c.width = 1000; c.height = 1400;
+      const cx = c.getContext('2d');
+      cx.drawImage(img, 0, 0);
+      c.toBlob(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = (document.getElementById('posterTitle').value.trim() || 'poster') + '-poster.png';
         a.click();
         URL.revokeObjectURL(a.href);
         URL.revokeObjectURL(url);
