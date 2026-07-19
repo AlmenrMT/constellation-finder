@@ -1485,16 +1485,15 @@
   }
 
   // ---------- poster ----------
-  // Renders the constellation "right side up" at the moment its center RA
-  // transits the observer's meridian. At that exact instant the parallactic
-  // angle is 0° or 180° (never anything in between) — the pattern's natural
-  // "up = toward the north celestial pole" orientation either exactly
-  // coincides with the viewer's "up = toward zenith" (when the pattern
-  // culminates SOUTH of zenith, i.e. centerDec < observer lat) or is exactly
-  // flipped (when it culminates NORTH of zenith, centerDec > lat — true for
-  // e.g. circumpolar northern patterns seen from mid-latitudes). We detect
-  // which case applies and correct for the flip, so the poster comes out
-  // upright either way instead of only in the common case.
+  // Rendered at the moment the pattern's center RA transits the observer's
+  // meridian — its real highest point for that latitude, which is what makes
+  // "fairly high in the sky, horizon below it" a genuine depiction rather than
+  // an arbitrary framing choice. Screen "up" always means higher real altitude
+  // (never flipped), which is what guarantees the top of the poster is always
+  // the highest point in the sky above the horizon — the one tradeoff is that
+  // in the rare case where a pattern culminates north of the observer's zenith,
+  // the drawing itself won't be upright relative to how it was originally
+  // sketched; altitude correctness wins over that.
   // A real star, not a chart marker: a small bright core plus a soft glow that
   // falls off with distance, sized/brightened by magnitude — same technique for
   // every star, background or matched, so the matched ones read as "part of the
@@ -1508,6 +1507,49 @@
       `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${coreR.toFixed(1)}" fill="#ffffff" opacity="${Math.min(1,op+0.15).toFixed(2)}"/>`;
   }
 
+  // A procedural silhouette of houses and trees along the bottom edge — a
+  // "shade horizon" grounding the poster the way a real night-sky photo would
+  // have a skyline in front of it. Purely decorative and randomized per
+  // generation; drawn last so it naturally occludes whatever sky/pattern
+  // content would otherwise show through it near the bottom.
+  function buildSkylineSvg(W, H, topY){
+    const baseline = H;
+    const stripH = H - topY;
+    let shapes = '';
+    let x = -20;
+    while(x < W+20){
+      if(Math.random() < 0.4){
+        const treeW = 26+Math.random()*26, treeH = stripH*(0.5+Math.random()*0.4);
+        const cx = x+treeW/2, trunkW = Math.max(4, treeW*0.14);
+        shapes += `<rect x="${(cx-trunkW/2).toFixed(1)}" y="${(baseline-treeH*0.22).toFixed(1)}" width="${trunkW.toFixed(1)}" height="${(treeH*0.22+2).toFixed(1)}" fill="#000000"/>`;
+        shapes += `<ellipse cx="${cx.toFixed(1)}" cy="${(baseline-treeH*0.62).toFixed(1)}" rx="${(treeW/2).toFixed(1)}" ry="${(treeH*0.5).toFixed(1)}" fill="#000000"/>`;
+        x += treeW + 8 + Math.random()*14;
+      } else {
+        const bW = 60+Math.random()*80, bH = stripH*(0.3+Math.random()*0.6);
+        const topYb = baseline-bH;
+        if(Math.random()<0.45){
+          const peakH = bH*0.22;
+          shapes += `<polygon points="${x.toFixed(1)},${(topYb+peakH).toFixed(1)} ${(x+bW/2).toFixed(1)},${topYb.toFixed(1)} ${(x+bW).toFixed(1)},${(topYb+peakH).toFixed(1)} ${(x+bW).toFixed(1)},${baseline.toFixed(1)} ${x.toFixed(1)},${baseline.toFixed(1)}" fill="#000000"/>`;
+        } else {
+          shapes += `<rect x="${x.toFixed(1)}" y="${topYb.toFixed(1)}" width="${bW.toFixed(1)}" height="${(bH+2).toFixed(1)}" fill="#000000"/>`;
+        }
+        const cols = Math.max(1, Math.floor(bW/24)), rows = Math.max(1, Math.floor(bH/26));
+        for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+          if(Math.random()<0.35){
+            const wx=x+10+c*22, wy=topYb+bH*0.28+r*24;
+            if(wy < baseline-10 && wx < x+bW-14) shapes += `<rect x="${wx.toFixed(1)}" y="${wy.toFixed(1)}" width="7" height="9" fill="#20264a" opacity="0.85"/>`;
+          }
+        }
+        x += bW + 6 + Math.random()*10;
+      }
+    }
+    // Only a thin ground line at the very bottom (to close small gaps between
+    // building/tree bases) — NOT a full-height fill, which would just paint
+    // solid black over the whole strip and make the buildings drawn on top of
+    // it (same color) completely invisible regardless of the glow behind them.
+    return `<rect x="0" y="${(baseline-16).toFixed(1)}" width="${W}" height="18" fill="#000000"/>` + shapes;
+  }
+
   function buildPosterSvg(match, mstEdges, drawingLayer, lat, lon, jd, title, mapUrl, bg){
     // Always a real night sky, regardless of the source image's own background
     // color (a poster isn't a diagram — it should look like looking up at night).
@@ -1516,17 +1558,21 @@
     const stars = match.matchedStars;
     const centerDec = stars.reduce((a,s)=>a+s.dec,0)/stars.length;
     const centerRa = circularMeanDeg(stars.map(s=>s.ra));
-    const flip = centerDec > lat;
 
     const altAz = stars.map(s => raDecToAltAz(s.ra, s.dec, lat, lon, jd));
     const centerAz = circularMeanDeg(altAz.map(p=>p.az));
     const centerAlt = altAz.reduce((a,p)=>a+p.alt,0)/altAz.length;
     const cosC = Math.max(0.2, Math.cos(degToRad(centerAlt)));
 
+    // "Up" in the image is always higher real altitude, never flipped — this is
+    // what guarantees the top of the poster is always the highest point in the
+    // sky. (The one thing this can't also guarantee is the drawing's own "up"
+    // matching its original sketch orientation — only possible in the rare case
+    // where a pattern culminates north of the observer's zenith. Altitude
+    // correctness wins there.)
     function toLocal(az,alt){
       const dAz = (((az-centerAz+540)%360)-180) * cosC;
-      const x = dAz, y = alt-centerAlt;
-      return flip ? { x:-x, y:-y } : { x, y };
+      return { x: dAz, y: alt-centerAlt };
     }
     const localPts = altAz.map(p=>toLocal(p.az,p.alt));
     const xs=localPts.map(p=>p.x), ys=localPts.map(p=>p.y);
@@ -1537,25 +1583,35 @@
     const halfDeg = patternSpan*0.55 + 26;
 
     const W = 1000, H = 1400;
-    const titleH = 150, footerPad = 40;
-    const skyH = H - titleH - footerPad;
-    const scale = Math.min(W/(halfDeg*2), skyH/(halfDeg*2)) * 0.96;
-    const skyCx = W/2, skyCy = titleH + skyH/2;
-    function toPixel(p){ return { x: skyCx + p.x*scale, y: skyCy - p.y*scale }; }
+    const titleH = 150, skylineH = 180;
+    const skyH = H - titleH - skylineH;
+
+    // Vertical framing is anchored to the real horizon (altitude 0) at the
+    // bottom of the sky area, not centered on the pattern — this is what
+    // actually produces "fairly high in the sky, horizon below it": the
+    // pattern lands wherever its own real transit altitude puts it above
+    // that horizon, rather than always being pinned to the middle.
+    const topAltDeg = centerAlt + halfDeg*1.15 + 8;
+    const bottomAltDeg = Math.min(0, centerAlt - halfDeg*1.3);
+    const altSpanDeg = Math.max(topAltDeg - bottomAltDeg, 20);
+
+    const scale = Math.min(W/(halfDeg*2), skyH/altSpanDeg) * 0.96;
+    const skyCx = W/2, skyBottomY = titleH + skyH;
+    function toPixel(p){
+      const alt = p.y + centerAlt;
+      return { x: skyCx + p.x*scale, y: skyBottomY - (alt-bottomAltDeg)*scale };
+    }
 
     // ---- background: every visible field star, labeled only where it has a real name ----
     const field = window.FIELD_STARS || [];
-    const azPad = halfDeg/cosC*1.05+3, altPad = halfDeg*1.05+3;
     let fieldSvg = '';
     for(const [ra,dec,mag,name] of field){
       const p = raDecToAltAz(ra, dec, lat, lon, jd);
-      if(p.alt < -2) continue;
-      const dAlt = p.alt - centerAlt;
-      if(Math.abs(dAlt) > altPad) continue;
+      if(p.alt < bottomAltDeg-5 || p.alt > topAltDeg+8) continue;
       let dAz = (((p.az-centerAz+540)%360)-180);
-      if(Math.abs(dAz*cosC) > azPad) continue;
+      if(Math.abs(dAz*cosC) > halfDeg*1.1+5) continue;
       const px = toPixel(toLocal(p.az, p.alt));
-      if(px.x<-20||px.x>W+20||px.y<titleH-20||px.y>H-footerPad+20) continue;
+      if(px.x<-20||px.x>W+20||px.y<titleH-20||px.y>skyBottomY+20) continue;
       fieldSvg += realStarSvg(px.x, px.y, mag, 'starGlow');
       if(name){
         const r = Math.max(1.4, (7.6-mag)*0.9);
@@ -1622,6 +1678,10 @@
       qrSvg += `<text x="${boxX+qrSize/2+pad}" y="${boxY-6}" fill="${TEXT_MUTED}" font-size="9" text-anchor="middle" font-family="-apple-system,sans-serif" opacity="0.7">view in AR</text>`;
     }
 
+    // ---- shade horizon: houses and trees, drawn last so they occlude
+    // whatever sky/pattern content would otherwise show through near the bottom ----
+    const skylineSvg = buildSkylineSvg(W, H, skyBottomY);
+
     const defsSvg = `<defs>`+
       `<radialGradient id="starGlow" cx="50%" cy="50%" r="50%">`+
         `<stop offset="0%" stop-color="#eaf2ff" stop-opacity="0.95"/>`+
@@ -1633,12 +1693,23 @@
         `<stop offset="40%" stop-color="#ffe9c2" stop-opacity="0.55"/>`+
         `<stop offset="100%" stop-color="#ffe9c2" stop-opacity="0"/>`+
       `</radialGradient>`+
+      `<linearGradient id="horizonGlow" x1="0" y1="0" x2="0" y2="1">`+
+        `<stop offset="0%" stop-color="#4a3a55" stop-opacity="0"/>`+
+        `<stop offset="55%" stop-color="#5c4256" stop-opacity="0.55"/>`+
+        `<stop offset="100%" stop-color="#7a5240" stop-opacity="0.95"/>`+
+      `</linearGradient>`+
     `</defs>`;
+
+    // A faint glow just above the skyline (like real light pollution near a
+    // horizon) — without it, black building/tree silhouettes are nearly
+    // invisible against an equally near-black sky.
+    const glowH = Math.min(skyH*0.35, 260);
+    const horizonGlowSvg = `<rect x="0" y="${(skyBottomY-glowH).toFixed(1)}" width="${W}" height="${(glowH+2).toFixed(1)}" fill="url(#horizonGlow)"/>`;
 
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`+
       defsSvg +
       `<rect width="${W}" height="${H}" fill="${NIGHT_BG}"/>`+
-      fieldSvg + drawingSvg + mstSvg + markSvg + titleSvg + qrSvg +
+      horizonGlowSvg + fieldSvg + drawingSvg + mstSvg + markSvg + skylineSvg + titleSvg + qrSvg +
       `</svg>`;
   }
 
@@ -2010,7 +2081,7 @@
     document.getElementById('posterPreviewHolder').innerHTML = lastPosterSvg;
     document.getElementById('posterDownloadPngBtn').disabled = false;
     document.getElementById('posterDownloadSvgBtn').disabled = false;
-    posterStatus.textContent = `Rendered at ${lat.toFixed(2)}°, ${lon.toFixed(2)}° — upright at local transit time.`;
+    posterStatus.textContent = `Rendered at ${lat.toFixed(2)}°, ${lon.toFixed(2)}° — at its highest point tonight, top of image = highest in the sky.`;
   });
 
   document.getElementById('posterDownloadSvgBtn').addEventListener('click', () => {
