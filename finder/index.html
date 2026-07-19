@@ -1728,8 +1728,15 @@
     // A faint glow just above the skyline (like real light pollution near a
     // horizon) — without it, black building/tree silhouettes are nearly
     // invisible against an equally near-black sky.
+    // The gradient fades IN on the sky side, reaching full brightness right at
+    // the horizon line — but a real town's glow doesn't fade back out again
+    // behind the buildings themselves. Without a second, flat-color fill
+    // covering the whole skyline strip, only the top sliver of each building
+    // silhouette would have anything to contrast against, and the rest would
+    // sit against plain near-black background — invisible again.
     const glowH = Math.min(skyH*0.35, 260);
-    const horizonGlowSvg = `<rect x="0" y="${(skyBottomY-glowH).toFixed(1)}" width="${W}" height="${(glowH+2).toFixed(1)}" fill="url(#horizonGlow)"/>`;
+    const horizonGlowSvg = `<rect x="0" y="${(skyBottomY-glowH).toFixed(1)}" width="${W}" height="${glowH.toFixed(1)}" fill="url(#horizonGlow)"/>`+
+      `<rect x="0" y="${skyBottomY.toFixed(1)}" width="${W}" height="${(H-skyBottomY+2).toFixed(1)}" fill="#7a5240" opacity="0.95"/>`;
 
     const svgOpen = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
     const full = svgOpen + defsSvg +
