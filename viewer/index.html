@@ -845,19 +845,27 @@
 
   resizeCanvas();
 
-  // ?map=<url> lets a link open straight into a specific map (e.g. shared from
-  // a landing page) instead of making everyone use the file picker.
+  // ?map=<url> lets a link (e.g. a poster's QR code) open straight into a
+  // specific map instead of making everyone use the file picker.
   (async function loadFromQueryParam(){
     const params = new URLSearchParams(location.search);
     const mapUrl = params.get('map');
     if(!mapUrl) return;
-    document.getElementById('loadStatus').textContent = 'Loading shared map…';
+    // Hide the "tap to choose" / shared-maps picker immediately — this runs
+    // synchronously before either this fetch or loadSharedMapsList's own
+    // fetch resolves, so a deep link never flashes the generic picker screen
+    // first. Only reappears if the fetch below actually fails.
+    document.getElementById('dropZone').style.display = 'none';
+    document.getElementById('sharedMaps').style.display = 'none';
+    document.getElementById('loadStatus').textContent = 'Loading your constellation…';
     try{
       const resp = await fetch(mapUrl);
       if(!resp.ok) throw new Error('HTTP '+resp.status);
       const obj = await resp.json();
       loadMapObject(obj, mapUrl.split('/').pop());
     }catch(err){
+      document.getElementById('dropZone').style.display = '';
+      document.getElementById('sharedMaps').style.display = '';
       document.getElementById('loadStatus').textContent = 'Could not load the shared map (' + err.message + ') — pick a file instead.';
     }
   })();

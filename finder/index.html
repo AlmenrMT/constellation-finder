@@ -167,6 +167,8 @@
       file under that exact name to <code>maps/</code> (and add it to <code>manifest.json</code>) for the
       code to resolve once scanned.
     </p>
+    <label style="display:block; font-size:12px; color:var(--muted); margin:14px 0 4px;">Constellation size <span class="val" id="posterZoomVal">1.0×</span></label>
+    <input type="range" id="posterZoom" min="0.4" max="3" step="0.05" value="1" style="width:100%; accent-color:var(--accent);">
     <div class="btnrow">
       <button class="primary" id="posterGenBtn">Generate</button>
     </div>
@@ -1500,11 +1502,11 @@
   // same sky" rather than as artificially highlighted symbols.
   function realStarSvg(x, y, mag, gradientId, boost){
     boost = boost || 1;
-    const glowR = Math.max(1.4, (7.6-mag)*0.9) * boost;
-    const coreR = Math.max(0.55, glowR*0.3);
-    const op = Math.max(0.35, Math.min(1, (7.6-mag)/6));
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(glowR*2.4).toFixed(1)}" fill="url(#${gradientId})" opacity="${op.toFixed(2)}"/>`+
-      `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${coreR.toFixed(1)}" fill="#ffffff" opacity="${Math.min(1,op+0.15).toFixed(2)}"/>`;
+    const glowR = Math.max(1.6, (7.6-mag)*1.05) * boost;
+    const coreR = Math.max(0.7, glowR*0.32);
+    const op = Math.max(0.55, Math.min(1, (7.6-mag)/5));
+    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(glowR*2.6).toFixed(1)}" fill="url(#${gradientId})" opacity="${Math.min(1,op+0.1).toFixed(2)}"/>`+
+      `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${coreR.toFixed(1)}" fill="#ffffff" opacity="1"/>`;
   }
 
   // A procedural silhouette of houses and trees along the bottom edge — a
@@ -1576,7 +1578,8 @@
     return `<rect x="0" y="${(baseline-16).toFixed(1)}" width="${W}" height="18" fill="#000000"/>` + shapes;
   }
 
-  function buildPosterSvg(match, mstEdges, drawingLayer, title, mapUrl, bg){
+  function buildPosterSvg(match, mstEdges, drawingLayer, title, mapUrl, bg, zoomFactor){
+    zoomFactor = zoomFactor || 1;
     // Always a real night sky, regardless of the source image's own background
     // color (a poster isn't a diagram — it should look like looking up at night).
     const NIGHT_BG = '#03050d';
@@ -1606,7 +1609,7 @@
     // clearly prominent, not lost in a wide field of background sky. Modest,
     // mostly-fixed padding (similar to the interactive chart's own framing),
     // not the much wider margin an earlier version used.
-    const pad = Math.max(spanX, spanY)*0.55 + 0.1;
+    const pad = (Math.max(spanX, spanY)*0.55 + 0.1) / zoomFactor;
     const viewMinX=minX-pad, viewMaxX=maxX+pad, viewMinY=minY-pad, viewMaxY=maxY+pad;
 
     const W = 1000, H = 1400;
@@ -1664,15 +1667,17 @@
     const pxStars = stars.map(s => toPixel(gnomonic(s.ra, s.dec, cra, cdec)));
     let mstSvg = '';
     for(const [a,b] of mstEdges||[]){
-      mstSvg += `<line x1="${pxStars[a].x.toFixed(1)}" y1="${pxStars[a].y.toFixed(1)}" x2="${pxStars[b].x.toFixed(1)}" y2="${pxStars[b].y.toFixed(1)}" stroke="${NIGHT_BG}" stroke-width="4" opacity="0.7" stroke-linecap="round"/>`;
+      mstSvg += `<line x1="${pxStars[a].x.toFixed(1)}" y1="${pxStars[a].y.toFixed(1)}" x2="${pxStars[b].x.toFixed(1)}" y2="${pxStars[b].y.toFixed(1)}" stroke="${NIGHT_BG}" stroke-width="4.5" opacity="0.8" stroke-linecap="round"/>`;
     }
     for(const [a,b] of mstEdges||[]){
-      mstSvg += `<line x1="${pxStars[a].x.toFixed(1)}" y1="${pxStars[a].y.toFixed(1)}" x2="${pxStars[b].x.toFixed(1)}" y2="${pxStars[b].y.toFixed(1)}" stroke="#cfe0ff" stroke-width="1.1" opacity="0.5"/>`;
+      mstSvg += `<line x1="${pxStars[a].x.toFixed(1)}" y1="${pxStars[a].y.toFixed(1)}" x2="${pxStars[b].x.toFixed(1)}" y2="${pxStars[b].y.toFixed(1)}" stroke="#eef4ff" stroke-width="1.5" opacity="0.9"/>`;
     }
     let markSvg = '';
     stars.forEach((s,i) => {
       const p = pxStars[i];
       markSvg += realStarSvg(p.x, p.y, s.mag, 'heroStarGlow', 1.35);
+      const r = Math.max(1.6, (7.6-s.mag)*1.05)*1.35;
+      markSvg += `<text x="${p.x.toFixed(1)}" y="${(p.y-r*2.6-8).toFixed(1)}" fill="${TEXT_TITLE}" font-size="14" text-anchor="middle" font-family="-apple-system,sans-serif" font-weight="600">${s.name}</text>`;
     });
 
     // ---- title + discreet sky position ----
@@ -2105,21 +2110,38 @@
     posterOverlay.style.display = 'none';
   });
 
-  document.getElementById('posterGenBtn').addEventListener('click', () => {
+  function generatePoster(){
     if(!lastBestMatch){ posterStatus.textContent = 'Find a constellation match first.'; return; }
     const rawTitle = document.getElementById('posterTitle').value.trim() || 'Constellation';
     const title = escapeXml(rawTitle);
+    const zoomFactor = parseFloat(document.getElementById('posterZoom').value) || 1;
 
     const safeFileName = rawTitle.replace(/[^A-Za-z0-9_-]/g, '_') || 'Constellation';
     const mapUrl = VIEWER_BASE_URL + '?map=' + encodeURIComponent('../maps/' + safeFileName + '.json');
 
-    lastPosterLayers = buildPosterSvg(lastBestMatch, lastMstEdges, lastDrawingLayer, title, mapUrl, lastBgColor);
+    lastPosterLayers = buildPosterSvg(lastBestMatch, lastMstEdges, lastDrawingLayer, title, mapUrl, lastBgColor, zoomFactor);
     lastPosterSvg = lastPosterLayers.full;
     document.getElementById('posterPreviewWrap').style.display = '';
     document.getElementById('posterPreviewHolder').innerHTML = lastPosterSvg;
     document.getElementById('posterDownloadPngBtn').disabled = false;
     document.getElementById('posterDownloadSvgBtn').disabled = false;
     posterStatus.textContent = 'Rendered — drawn exactly as sketched, north up.';
+  }
+  document.getElementById('posterGenBtn').addEventListener('click', generatePoster);
+
+  // Title and size-slider edits re-render live (debounced) once a poster has
+  // already been generated at least once — no need to keep re-pressing
+  // Generate for every small adjustment.
+  let posterLiveTimer = null;
+  function schedulePosterLiveUpdate(){
+    if(!lastPosterLayers) return; // first render still needs an explicit Generate
+    if(posterLiveTimer) clearTimeout(posterLiveTimer);
+    posterLiveTimer = setTimeout(generatePoster, 150);
+  }
+  document.getElementById('posterTitle').addEventListener('input', schedulePosterLiveUpdate);
+  document.getElementById('posterZoom').addEventListener('input', () => {
+    document.getElementById('posterZoomVal').textContent = parseFloat(document.getElementById('posterZoom').value).toFixed(2)+'×';
+    schedulePosterLiveUpdate();
   });
 
   document.getElementById('posterDownloadSvgBtn').addEventListener('click', () => {
