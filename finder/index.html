@@ -73,10 +73,15 @@
     </div>
     <div class="btnrow">
       <button id="autoDetectBtn">Auto-detect landmarks…</button>
-      <button id="invertBtn">Invert colors</button>
     </div>
-    <p class="hint" id="invertStatus" style="color:var(--muted); font-size:11px; margin:4px 0 0;"></p>
     <input type="file" id="fileInput" accept="image/*">
+
+    <label class="row" style="align-items:center; gap:6px; margin-top:14px;">
+      <input type="checkbox" id="invertToggle" style="width:auto;">
+      <span style="font-size:12px; color:var(--text);">Invert colors</span>
+    </label>
+    <label>Line width <span class="val" id="lineWidthVal">0</span></label>
+    <input type="range" id="lineWidthSlider" min="-6" max="6" step="1" value="0">
 
     <label>Light-intensity weight <span class="val" id="weightVal"></span></label>
     <input type="range" id="weight" min="0" max="1.5" step="0.05" value="0.5">
@@ -265,7 +270,9 @@
   let lastDrawingLayer = null;
   let lastBgColor = null;
   let lastLoadedFileName = '';
-  let originalPhotoImg = null; // the real photo as uploaded, kept aside for Auto-detect's landmark/corner detection even after the visible active object (srcCanvas) gets sketch-ified or inverted
+  let originalPhotoImg = null; // the finished line drawing as uploaded, kept aside so Invert/Line width always recompute from a clean copy instead of compounding
+  let invertOn = false;
+  let lineWidthValue = 0; // -6..6, 0 = unchanged; negative = thinner (erode), positive = thicker (dilate)
   const FINDER_SIZE = 720;
 
   function stripExtension(name){
@@ -318,32 +325,23 @@
     scheduleProcess();
   }
 
+  // An upload is treated as an already-finished line drawing — nothing is
+  // done to it automatically. The app's own job starts and ends at finding
+  // landmarks and finding the matching constellation; Invert and Line width
+  // below are the only (optional, manual) adjustments offered, and both
+  // recompute cleanly from this original each time rather than compounding.
   function loadFile(file){
     if(!file || !file.type.startsWith('image/')) return;
     lastLoadedFileName = stripExtension(file.name);
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      originalPhotoImg = img; // remembered for Auto-detect's landmark/corner detection, even after Apply Sketch / Invert edit the visible active object
-      // A plain photo (no marker dots on it yet) gets turned into a line
-      // sketch immediately — no separate manual step. A quick probe with the
-      // SAME orange-dot detector the main pipeline uses tells the two cases
-      // apart: if this upload is actually a previously-exported composite
-      // being re-loaded (already has its dots), sketch-ifying it would
-      // destroy them by converting everything to grayscale edges, so that
-      // case is left untouched.
-      const iw = img.naturalWidth||img.width, ih = img.naturalHeight||img.height;
-      const pscale = Math.min(1, MAX_DIM/Math.max(iw,ih));
-      const probe = document.createElement('canvas');
-      probe.width = Math.max(1,Math.round(iw*pscale)); probe.height = Math.max(1,Math.round(ih*pscale));
-      probe.getContext('2d').drawImage(img, 0, 0, probe.width, probe.height);
-      const probeDots = detectDots(probe.getContext('2d').getImageData(0,0,probe.width,probe.height));
-      if(probeDots.length < 3){
-        const sketchCanvas = buildSketchCanvasFromImage(img, Math.min(1400, Math.max(iw,ih)));
-        loadImageToCanvas(sketchCanvas);
-      } else {
-        loadImageToCanvas(img);
-      }
+      originalPhotoImg = img;
+      invertOn = false; lineWidthValue = 0;
+      document.getElementById('invertToggle').checked = false;
+      document.getElementById('lineWidthSlider').value = 0;
+      document.getElementById('lineWidthVal').textContent = '0';
+      loadImageToCanvas(img);
       URL.revokeObjectURL(url);
     };
     img.src = url;
@@ -364,6 +362,10 @@
 
   document.getElementById('sampleBtn').addEventListener('click', () => {
     originalPhotoImg = null; // synthetic pattern, not a real photo — Auto-detect should fall back to the active object itself
+    invertOn = false; lineWidthValue = 0;
+    document.getElementById('invertToggle').checked = false;
+    document.getElementById('lineWidthSlider').value = 0;
+    document.getElementById('lineWidthVal').textContent = '0';
     const w = 300, h = 460;
     srcCanvas.width = w; srcCanvas.height = h;
     const c = srcCanvas.getContext('2d');
@@ -621,6 +623,47 @@
     const data = imgData.data, o = out.data;
     for(let i=0;i<data.length;i+=4){
       o[i]=255-data[i]; o[i+1]=255-data[i+1]; o[i+2]=255-data[i+2]; o[i+3]=data[i+3];
+    }
+    return out;
+  }
+
+  // ---------- line width: morphological dilate (thicker) / erode (thinner) ----------
+  // Works on luminance (this app's line drawings are effectively monochrome —
+  // light lines on a dark field, or vice versa), via a separable min/max
+  // filter: a full 2D square-kernel min/max equals a horizontal pass followed
+  // by a vertical pass, which is what makes an O(radius) per pixel filter
+  // possible instead of O(radius²).
+  function applyLineWidthImageData(imgData, amount){
+    if(!amount) return imgData;
+    const w = imgData.width, h = imgData.height, data = imgData.data;
+    const n = w*h;
+    const lum = new Float32Array(n);
+    for(let i=0,p=0;i<data.length;i+=4,p++) lum[p] = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+    const radius = Math.abs(amount), dilate = amount > 0;
+    const tmp = new Float32Array(n);
+    for(let y=0;y<h;y++){
+      const row = y*w;
+      for(let x=0;x<w;x++){
+        let best = lum[row+x];
+        for(let d=1;d<=radius;d++){
+          if(x-d>=0){ const v=lum[row+x-d]; if(dilate?v>best:v<best) best=v; }
+          if(x+d<w){ const v=lum[row+x+d]; if(dilate?v>best:v<best) best=v; }
+        }
+        tmp[row+x] = best;
+      }
+    }
+    const out = new ImageData(w, h);
+    for(let x=0;x<w;x++){
+      for(let y=0;y<h;y++){
+        let best = tmp[y*w+x];
+        for(let d=1;d<=radius;d++){
+          if(y-d>=0){ const v=tmp[(y-d)*w+x]; if(dilate?v>best:v<best) best=v; }
+          if(y+d<h){ const v=tmp[(y+d)*w+x]; if(dilate?v>best:v<best) best=v; }
+        }
+        const idx=(y*w+x)*4;
+        out.data[idx]=out.data[idx+1]=out.data[idx+2]=best;
+        out.data[idx+3]=255;
+      }
     }
     return out;
   }
@@ -931,15 +974,44 @@
     composite.src = c.toDataURL('image/png');
   });
 
-  // ---------- invert colors: a direct one-click action on the active object, not a popup ----------
-  document.getElementById('invertBtn').addEventListener('click', () => {
-    const invertStatus = document.getElementById('invertStatus');
-    if(!sourceLoaded){ invertStatus.textContent = 'Upload an image first.'; return; }
+  // ---------- invert + line width: both recompute from the ORIGINAL upload
+  // each time, in the same fixed order (line width, then invert), so dragging
+  // the slider back and forth or toggling invert never compounds/degrades the
+  // image and never depends on which one you touched first. ----------
+  function recomputeActiveImage(){
+    if(!originalPhotoImg) return;
+    // Draw straight onto srcCanvas in a single hop — identical to what a plain
+    // upload does — instead of compositing through an intermediate canvas and
+    // handing that off to loadImageToCanvas(), which used to draw the image a
+    // second time and left visible resampling artifacts even at "no change".
+    const iw = originalPhotoImg.naturalWidth||originalPhotoImg.width, ih = originalPhotoImg.naturalHeight||originalPhotoImg.height;
+    const scale = Math.min(1, MAX_DIM/Math.max(iw,ih));
+    const w = Math.max(1,Math.round(iw*scale)), h = Math.max(1,Math.round(ih*scale));
+    srcCanvas.width = w; srcCanvas.height = h;
     const ctx = srcCanvas.getContext('2d');
-    const imgData = ctx.getImageData(0, 0, srcCanvas.width, srcCanvas.height);
-    ctx.putImageData(invertImageData(imgData), 0, 0);
-    invertStatus.textContent = 'Colors inverted.';
+    ctx.drawImage(originalPhotoImg, 0, 0, w, h);
+    if(lineWidthValue !== 0 || invertOn){
+      let imgData = ctx.getImageData(0, 0, w, h);
+      imgData = applyLineWidthImageData(imgData, lineWidthValue);
+      if(invertOn) imgData = invertImageData(imgData);
+      ctx.putImageData(imgData, 0, 0);
+    }
+    sourceLoaded = true;
+    dropHint.style.display = 'none';
     scheduleProcess();
+  }
+
+  document.getElementById('invertToggle').addEventListener('change', e => {
+    invertOn = e.target.checked;
+    recomputeActiveImage();
+  });
+
+  let lineWidthTimer = null;
+  document.getElementById('lineWidthSlider').addEventListener('input', e => {
+    lineWidthValue = parseInt(e.target.value, 10);
+    document.getElementById('lineWidthVal').textContent = (lineWidthValue>0?'+':'')+lineWidthValue;
+    if(lineWidthTimer) clearTimeout(lineWidthTimer);
+    lineWidthTimer = setTimeout(recomputeActiveImage, 120);
   });
 
   // Solves the 2D affine (a,b,c,d,e,f) that maps 3 source points onto 3
