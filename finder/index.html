@@ -73,6 +73,7 @@
     </div>
     <div class="btnrow">
       <button id="autoDetectBtn">Auto-detect from photo…</button>
+      <button id="invertBtn">Invert image colors…</button>
     </div>
     <input type="file" id="fileInput" accept="image/*">
 
@@ -131,14 +132,26 @@
       <button id="autoCloseBtn">Close ✕</button>
     </div>
     <p style="color:var(--muted); font-size:12px; margin:0 0 12px;">
-      Upload the original photo (for point detection) and, optionally, your inverted line-art image
-      (from imagetosketch.com etc.) to composite the dots onto. If you skip the line-art image, the
-      photo itself is used as a placeholder background.
+      Upload the original photo (for point detection) and, optionally, your own inverted line-art image
+      to composite the dots onto — or have one generated automatically from the photo below, no external
+      site needed.
     </p>
     <label style="display:block; font-size:12px; color:var(--muted); margin:8px 0 4px;">1. Original photo</label>
     <input type="file" id="autoPhotoInput" accept="image/*">
-    <label style="display:block; font-size:12px; color:var(--muted); margin:8px 0 4px;">2. Line-art image (optional)</label>
+    <label style="display:block; font-size:12px; color:var(--muted); margin:8px 0 4px;">2. Line-art image (optional — skip if generating one below)</label>
     <input type="file" id="autoLineArtInput" accept="image/*">
+
+    <label class="checkRow" style="margin:14px 0 4px;"><input type="checkbox" id="autoGenSketch"><span>Generate the sketch from the photo automatically</span></label>
+    <div id="autoSketchControls" style="display:none;">
+      <label style="display:block; font-size:12px; color:var(--muted); margin:8px 0 4px;">Line detail <span class="val" id="sketchDetailVal"></span></label>
+      <input type="range" id="sketchDetail" min="1" max="14" step="1" value="5" style="width:100%; accent-color:var(--accent);">
+      <label style="display:block; font-size:12px; color:var(--muted); margin:8px 0 4px;">Contrast <span class="val" id="sketchContrastVal"></span></label>
+      <input type="range" id="sketchContrast" min="0.5" max="3" step="0.05" value="1.4" style="width:100%; accent-color:var(--accent);">
+      <div class="canvasWrap" id="sketchPreviewWrap" style="margin-top:8px;">
+        <canvas id="sketchPreviewCanvas"></canvas>
+      </div>
+    </div>
+
     <div class="btnrow">
       <button class="primary" id="autoRunBtn">Detect points</button>
     </div>
@@ -146,10 +159,32 @@
     <div class="canvasWrap" id="autoCanvasWrap" style="display:none; margin-top:12px;">
       <canvas id="autoCanvas"></canvas>
     </div>
+    <label style="display:block; font-size:12px; color:var(--muted); margin:10px 0 4px;">Marker size <span class="val" id="dotSizeVal">1.0×</span></label>
+    <input type="range" id="dotSizeSlider" min="0.4" max="2.5" step="0.05" value="1" style="width:100%; accent-color:var(--accent);">
     <p style="color:var(--muted); font-size:11px; margin:8px 0 0;" id="autoEditHint"></p>
     <div class="btnrow">
       <button class="primary" id="autoUseBtn" disabled>Use this pattern</button>
       <button id="autoResetBtn" disabled>Reset to auto-detected</button>
+    </div>
+  </div>
+</div>
+
+<div id="invertOverlay" style="display:none; position:fixed; inset:0; background:rgba(10,10,12,0.8); z-index:30; align-items:center; justify-content:center; padding:20px; overflow-y:auto;">
+  <div class="panel" style="max-width:480px; width:100%; margin:20px 0;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h2 style="margin:0; font-size:16px;">Invert image colors</h2>
+      <button id="invertCloseBtn">Close ✕</button>
+    </div>
+    <p style="color:var(--muted); font-size:12px; margin:0 0 12px;">
+      For a sketch you already made elsewhere (e.g. black lines on white) — flips it to white lines on
+      black, entirely in your browser.
+    </p>
+    <input type="file" id="invertFileInput" accept="image/*">
+    <div class="canvasWrap" id="invertPreviewWrap" style="display:none; margin-top:12px;">
+      <canvas id="invertCanvas"></canvas>
+    </div>
+    <div class="btnrow">
+      <button class="primary" id="invertDownloadBtn" disabled>Download inverted image</button>
     </div>
   </div>
 </div>
@@ -496,6 +531,70 @@
     return { w, h, gx, gy };
   }
 
+  // ---------- local photo -> pencil-sketch filter (replaces imagetosketch.com) ----------
+  // Separable box blur (horizontal then vertical pass) — a fast, dependency-free
+  // approximation of a Gaussian blur, good enough for a sketch effect.
+  function boxBlurGray(src, w, h, radius){
+    if(radius < 1) return src.slice();
+    const size = radius*2+1;
+    const tmp = new Float32Array(w*h), out = new Float32Array(w*h);
+    for(let y=0;y<h;y++){
+      const row = y*w;
+      let sum = 0;
+      for(let x=-radius;x<=radius;x++) sum += src[row + Math.min(w-1, Math.max(0, x))];
+      for(let x=0;x<w;x++){
+        tmp[row+x] = sum/size;
+        sum += src[row + Math.min(w-1, x+radius+1)] - src[row + Math.max(0, x-radius)];
+      }
+    }
+    for(let x=0;x<w;x++){
+      let sum = 0;
+      for(let y=-radius;y<=radius;y++) sum += tmp[Math.min(h-1, Math.max(0, y))*w + x];
+      for(let y=0;y<h;y++){
+        out[y*w+x] = sum/size;
+        sum += tmp[Math.min(h-1, y+radius+1)*w+x] - tmp[Math.max(0, y-radius)*w+x];
+      }
+    }
+    return out;
+  }
+
+  // Classic "color dodge" pencil-sketch technique: blend the grayscale photo
+  // with a blurred, inverted copy of itself. detailRadius controls how thick/
+  // soft the resulting lines are (bigger = thicker+softer, smaller = finer);
+  // contrast pushes the result toward more binary black/white. Output is
+  // white lines on black by construction — this app's whole aesthetic is
+  // already built around that polarity (see the "invert" step this replaces),
+  // so there's no separate invert toggle to expose here.
+  function buildSketchImageData(imgData, detailRadius, contrast){
+    const w = imgData.width, h = imgData.height, data = imgData.data;
+    const n = w*h;
+    const gray = new Float32Array(n);
+    for(let i=0,p=0;i<data.length;i+=4,p++) gray[p] = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+    const invGray = new Float32Array(n);
+    for(let p=0;p<n;p++) invGray[p] = 255-gray[p];
+    const blurred = boxBlurGray(invGray, w, h, detailRadius);
+    const out = new ImageData(w, h);
+    for(let p=0;p<n;p++){
+      let val = Math.min(255, gray[p]*255/Math.max(1, 255-blurred[p]));
+      val = (val-128)*contrast + 128;
+      val = 255 - Math.max(0, Math.min(255, val)); // invert: white lines on black
+      const idx = p*4;
+      out.data[idx]=out.data[idx+1]=out.data[idx+2]=val;
+      out.data[idx+3]=255;
+    }
+    return out;
+  }
+
+  // ---------- local color inversion (replaces pinetools.com/invert-image-colors) ----------
+  function invertImageData(imgData){
+    const out = new ImageData(imgData.width, imgData.height);
+    const data = imgData.data, o = out.data;
+    for(let i=0;i<data.length;i+=4){
+      o[i]=255-data[i]; o[i+1]=255-data[i+1]; o[i+2]=255-data[i+2]; o[i+3]=data[i+3];
+    }
+    return out;
+  }
+
   // Integral (summed-area) image so an NxN windowed sum is O(1) per pixel.
   function integralImage(arr, w, h){
     const sum = new Float64Array((w+1)*(h+1));
@@ -592,14 +691,21 @@
   const autoEditHint = document.getElementById('autoEditHint');
   let autoBackdropImg = null;   // the image drawn behind the dots (line-art or photo fallback)
   let autoPhotoCanvas = null;   // offscreen canvas of the original photo, for detection + gradient sampling
-  let autoDots = [];            // [{x,y,r}] in autoBackdropImg pixel space
+  let autoDots = [];            // [{x,y,r}] in autoBackdropImg pixel space — r is the BASE size, before dotSizeMultiplier
   let autoDetectedDots = [];    // snapshot of the raw auto-detected result, for "Reset"
+  let dotSizeMultiplier = 1;    // live "Marker size" slider — applied at draw/composite time, not baked into stored r
 
   document.getElementById('autoDetectBtn').addEventListener('click', () => {
     autoOverlay.style.display = 'flex';
   });
   document.getElementById('autoCloseBtn').addEventListener('click', () => {
     autoOverlay.style.display = 'none';
+  });
+
+  document.getElementById('dotSizeSlider').addEventListener('input', e => {
+    dotSizeMultiplier = parseFloat(e.target.value);
+    document.getElementById('dotSizeVal').textContent = dotSizeMultiplier.toFixed(2)+'×';
+    renderAutoCanvas();
   });
 
   function renderAutoCanvas(){
@@ -621,7 +727,7 @@
     ctx.fillStyle = '#e6941e';
     for(const d of autoDots){
       ctx.beginPath();
-      ctx.arc(d.x*dispScale, d.y*dispScale, Math.max(3, d.r*dispScale), 0, Math.PI*2);
+      ctx.arc(d.x*dispScale, d.y*dispScale, Math.max(3, d.r*dotSizeMultiplier*dispScale), 0, Math.PI*2);
       ctx.fill();
     }
   }
@@ -648,6 +754,57 @@
     renderAutoCanvas();
   });
 
+  // Builds the pencil-sketch backdrop from a photo at a given max dimension,
+  // using whatever the detail/contrast sliders are currently set to. Shared
+  // by the live preview (small, fast) and the final full-resolution backdrop.
+  function buildSketchCanvasFromImage(img, maxDim){
+    const iw = img.naturalWidth||img.width, ih = img.naturalHeight||img.height;
+    const scale = Math.min(1, maxDim/Math.max(iw,ih));
+    const w = Math.max(1,Math.round(iw*scale)), h = Math.max(1,Math.round(ih*scale));
+    const srcCanvas = document.createElement('canvas');
+    srcCanvas.width=w; srcCanvas.height=h;
+    srcCanvas.getContext('2d').drawImage(img,0,0,w,h);
+    const imgData = srcCanvas.getContext('2d').getImageData(0,0,w,h);
+    const detail = parseInt(document.getElementById('sketchDetail').value,10);
+    const contrast = parseFloat(document.getElementById('sketchContrast').value);
+    const sketchData = buildSketchImageData(imgData, detail, contrast);
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width=w; outCanvas.height=h;
+    outCanvas.getContext('2d').putImageData(sketchData,0,0);
+    return outCanvas;
+  }
+
+  let sketchPreviewTimer = null;
+  async function updateSketchPreview(){
+    if(!document.getElementById('autoGenSketch').checked) return;
+    const photoFile = document.getElementById('autoPhotoInput').files[0];
+    if(!photoFile) return;
+    const img = await loadImage(URL.createObjectURL(photoFile));
+    const canvas = buildSketchCanvasFromImage(img, 480);
+    const previewCanvas = document.getElementById('sketchPreviewCanvas');
+    previewCanvas.width = canvas.width; previewCanvas.height = canvas.height;
+    previewCanvas.getContext('2d').drawImage(canvas, 0, 0);
+  }
+  function scheduleSketchPreview(){
+    if(sketchPreviewTimer) clearTimeout(sketchPreviewTimer);
+    sketchPreviewTimer = setTimeout(updateSketchPreview, 150);
+  }
+  document.getElementById('autoGenSketch').addEventListener('change', () => {
+    document.getElementById('autoSketchControls').style.display = document.getElementById('autoGenSketch').checked ? '' : 'none';
+    scheduleSketchPreview();
+  });
+  document.getElementById('sketchDetail').addEventListener('input', () => {
+    document.getElementById('sketchDetailVal').textContent = document.getElementById('sketchDetail').value;
+    scheduleSketchPreview();
+  });
+  document.getElementById('sketchContrast').addEventListener('input', () => {
+    document.getElementById('sketchContrastVal').textContent = parseFloat(document.getElementById('sketchContrast').value).toFixed(2);
+    scheduleSketchPreview();
+  });
+  document.getElementById('autoPhotoInput').addEventListener('change', scheduleSketchPreview);
+  document.getElementById('sketchDetailVal').textContent = document.getElementById('sketchDetail').value;
+  document.getElementById('sketchContrastVal').textContent = parseFloat(document.getElementById('sketchContrast').value).toFixed(2);
+
   async function runAutoDetect(){
     const photoFile = document.getElementById('autoPhotoInput').files[0];
     if(!photoFile){ autoStatus.textContent = 'Choose the original photo first.'; return; }
@@ -656,9 +813,13 @@
     document.getElementById('autoResetBtn').disabled = true;
 
     const photoImg = await loadImage(URL.createObjectURL(photoFile));
-    const lineArtFile = document.getElementById('autoLineArtInput').files[0];
-    const lineArtImg = lineArtFile ? await loadImage(URL.createObjectURL(lineArtFile)) : null;
-    autoBackdropImg = lineArtImg || photoImg;
+    const genSketch = document.getElementById('autoGenSketch').checked;
+    let lineArtImg = null;
+    if(!genSketch){
+      const lineArtFile = document.getElementById('autoLineArtInput').files[0];
+      lineArtImg = lineArtFile ? await loadImage(URL.createObjectURL(lineArtFile)) : null;
+    }
+    autoBackdropImg = genSketch ? buildSketchCanvasFromImage(photoImg, 900) : (lineArtImg || photoImg);
 
     // Detection always runs against the ORIGINAL photo (real pixel content),
     // even when compositing onto a separate line-art image.
@@ -717,7 +878,7 @@
     ctx.fillStyle = '#e6941e';
     for(const d of autoDots){
       ctx.beginPath();
-      ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
+      ctx.arc(d.x, d.y, d.r*dotSizeMultiplier, 0, Math.PI*2);
       ctx.fill();
     }
     const photoFile = document.getElementById('autoPhotoInput').files[0];
@@ -2182,6 +2343,42 @@
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = (document.getElementById('posterTitle').value.trim() || 'poster') + '-poster.png';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+  });
+
+  // ---------- standalone invert-colors tool (replaces pinetools.com) ----------
+  const invertOverlay = document.getElementById('invertOverlay');
+  const invertCanvas = document.getElementById('invertCanvas');
+  let invertedFileBaseName = 'inverted';
+
+  document.getElementById('invertBtn').addEventListener('click', () => { invertOverlay.style.display = 'flex'; });
+  document.getElementById('invertCloseBtn').addEventListener('click', () => { invertOverlay.style.display = 'none'; });
+
+  document.getElementById('invertFileInput').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if(!file) return;
+    invertedFileBaseName = stripExtension(file.name) || 'inverted';
+    const img = await loadImage(URL.createObjectURL(file));
+    const iw = img.naturalWidth||img.width, ih = img.naturalHeight||img.height;
+    const scale = Math.min(1, MAX_DIM*2/Math.max(iw,ih));
+    const w = Math.max(1,Math.round(iw*scale)), h = Math.max(1,Math.round(ih*scale));
+    const src = document.createElement('canvas');
+    src.width=w; src.height=h;
+    src.getContext('2d').drawImage(img,0,0,w,h);
+    const inverted = invertImageData(src.getContext('2d').getImageData(0,0,w,h));
+    invertCanvas.width = w; invertCanvas.height = h;
+    invertCanvas.getContext('2d').putImageData(inverted, 0, 0);
+    document.getElementById('invertPreviewWrap').style.display = '';
+    document.getElementById('invertDownloadBtn').disabled = false;
+  });
+
+  document.getElementById('invertDownloadBtn').addEventListener('click', () => {
+    invertCanvas.toBlob(blob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = invertedFileBaseName + '-inverted.png';
       a.click();
       URL.revokeObjectURL(a.href);
     });
