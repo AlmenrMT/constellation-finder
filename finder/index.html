@@ -67,7 +67,11 @@
 
 <div class="layout">
   <div class="panel controls">
-    <div class="btnrow" style="margin-top:0;">
+    <label style="margin-top:0;">Constellation name</label>
+    <input type="text" id="constellationName" placeholder="e.g. Anton" style="width:100%; background:#1f2024; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px;">
+    <div style="font-size:10px; color:var(--muted); margin-top:4px;">ID: <span id="constellationIdDisplay">—</span></div>
+
+    <div class="btnrow">
       <button class="primary" id="uploadBtn">Upload image</button>
       <button id="sampleBtn">Try sample pattern</button>
     </div>
@@ -98,8 +102,15 @@
       <button id="downloadPng">Download chart PNG</button>
     </div>
     <div class="btnrow">
-      <button id="downloadJson">Download map file (.json)</button>
+      <button class="primary" id="publishBtn">Publish in Viewer</button>
     </div>
+    <div id="ghTokenRow" style="margin-top:8px;">
+      <label style="margin-top:0;">GitHub token <span style="color:var(--muted); font-weight:400;">(saved in this browser only, used only to talk to api.github.com)</span></label>
+      <input type="password" id="ghTokenInput" placeholder="fine-grained token, Contents: read/write on this repo" style="width:100%; background:#1f2024; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px;">
+      <div class="btnrow"><button id="ghTokenSaveBtn">Save token</button></div>
+    </div>
+    <p class="hint" id="ghTokenChangeHint" style="display:none; margin:6px 0 0;"><a href="#" id="ghTokenChangeLink" style="color:var(--accent);">Change GitHub token</a></p>
+    <div class="stats" id="publishStatus"></div>
     <div class="btnrow">
       <button id="posterBtn">Create poster…</button>
     </div>
@@ -143,12 +154,10 @@
       <h3 style="margin:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted);">Create poster</h3>
       <button id="posterCloseBtn">Close ✕</button>
     </div>
-    <label style="margin-top:16px;">Poster title</label>
-    <input type="text" id="posterTitle" placeholder="e.g. Anton" style="width:100%; background:#1f2024; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px;">
-    <p class="hint" style="margin:6px 0 0;">
-      The QR code links to <code>viewer/?map=../maps/&lt;title&gt;.json</code> — upload the exported map
-      file under that exact name to <code>maps/</code> (and add it to <code>manifest.json</code>) for the
-      code to resolve once scanned.
+    <p class="hint" style="margin:16px 0 0;">
+      Uses the constellation name from the panel above. The QR code links straight to this
+      constellation's unique ID in the viewer — publish it there first (see "Publish in Viewer")
+      so scanning it actually resolves to something.
     </p>
     <label>Constellation size <span class="val" id="posterZoomVal">1.0×</span></label>
     <input type="range" id="posterZoom" min="0.4" max="3" step="0.05" value="1">
@@ -240,6 +249,15 @@
   let lastDrawingLayer = null;
   let lastBgColor = null;
   let lastLoadedFileName = '';
+  // A stable identity for this constellation, independent of its (editable,
+  // possibly duplicate) display name — used as the published filename and
+  // the QR/viewer link, so renaming later never breaks anything already
+  // shared. Regenerated only when a genuinely new image is loaded, not on
+  // every edit (invert, line width, dot tweaks, poster settings).
+  let constellationId = null;
+  function generateConstellationId(){
+    return Date.now().toString(36) + Math.random().toString(36).slice(2,8);
+  }
   let originalPhotoImg = null; // the finished line drawing as uploaded, kept aside so Invert/Line width always recompute from a clean copy instead of compounding
   let invertOn = false;
   let lineWidthValue = 0; // 0..3 pixels of dilation, 0 = unchanged
@@ -829,6 +847,10 @@
     }
     if(isNewImage){
       autoDots = [];
+      constellationId = generateConstellationId();
+      document.getElementById('constellationIdDisplay').textContent = constellationId;
+      const nameInput = document.getElementById('constellationName');
+      if(!nameInput.value) nameInput.value = lastLoadedFileName || '';
       await runDetection();
     }
     compositeDotsAndProcess();
@@ -2162,6 +2184,8 @@
     // change location/time and recompute with standard formulas — see below).
     lastMatchData = {
       schema: 'constellation-map-v1',
+      id: constellationId,
+      name: document.getElementById('constellationName').value.trim() || 'Constellation',
       generatedAt: new Date().toISOString(),
       howToRender: {
         summary: 'Everything needed to redraw this chart and re-align "drawing" with the stars, independent of this app.',
@@ -2213,14 +2237,102 @@
     URL.revokeObjectURL(a.href);
   });
 
-  document.getElementById('downloadJson').addEventListener('click', () => {
-    if(!lastMatchData) return;
-    const blob = new Blob([JSON.stringify(lastMatchData, null, 2)], {type:'application/json'});
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'constellation-map.json';
-    a.click();
-    URL.revokeObjectURL(a.href);
+  // ---------- publish to the shared viewer (GitHub Contents API) ----------
+  // This app has no backend — it's a static page, and so is the viewer. The
+  // only way a button here can make a map "live" for anyone else is to
+  // commit it straight into the repo behind GitHub Pages, using a token the
+  // user provides and that stays in their own browser's localStorage. Never
+  // sent anywhere except api.github.com.
+  const GH_OWNER = 'AlmenrMT', GH_REPO = 'constellation-finder', GH_BRANCH = 'main';
+  const GH_TOKEN_KEY = 'constellationFinderGhToken';
+  const ghTokenRow = document.getElementById('ghTokenRow');
+  const ghTokenChangeHint = document.getElementById('ghTokenChangeHint');
+  const publishStatus = document.getElementById('publishStatus');
+
+  function ghToken(){ return localStorage.getItem(GH_TOKEN_KEY) || ''; }
+  function refreshGhTokenUi(){
+    const has = !!ghToken();
+    ghTokenRow.style.display = has ? 'none' : '';
+    ghTokenChangeHint.style.display = has ? '' : 'none';
+  }
+  refreshGhTokenUi();
+
+  document.getElementById('ghTokenSaveBtn').addEventListener('click', () => {
+    const v = document.getElementById('ghTokenInput').value.trim();
+    if(!v) return;
+    localStorage.setItem(GH_TOKEN_KEY, v);
+    document.getElementById('ghTokenInput').value = '';
+    refreshGhTokenUi();
+    publishStatus.textContent = 'Token saved. Click Publish in Viewer again.';
+  });
+  document.getElementById('ghTokenChangeLink').addEventListener('click', e => {
+    e.preventDefault();
+    ghTokenRow.style.display = '';
+    ghTokenChangeHint.style.display = 'none';
+  });
+
+  // UTF-8-safe base64 (btoa alone only handles Latin1) — matches the inverse
+  // decode below.
+  function utf8ToBase64(str){ return btoa(unescape(encodeURIComponent(str))); }
+  function base64ToUtf8(b64){ return decodeURIComponent(escape(atob(b64.replace(/\n/g,'')))); }
+
+  async function ghGetFile(path){
+    const resp = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}?ref=${GH_BRANCH}`, {
+      headers: { Authorization: `Bearer ${ghToken()}`, Accept: 'application/vnd.github+json' },
+    });
+    if(resp.status === 404) return null;
+    if(!resp.ok) throw new Error(`reading ${path} failed (HTTP ${resp.status})`);
+    const data = await resp.json();
+    return { sha: data.sha, content: base64ToUtf8(data.content) };
+  }
+  async function ghPutFile(path, contentStr, message, sha){
+    const body = { message, content: utf8ToBase64(contentStr), branch: GH_BRANCH };
+    if(sha) body.sha = sha;
+    const resp = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${ghToken()}`, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if(!resp.ok){
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.message || `writing ${path} failed (HTTP ${resp.status})`);
+    }
+    return resp.json();
+  }
+
+  document.getElementById('publishBtn').addEventListener('click', async () => {
+    if(!ghToken()){
+      publishStatus.textContent = 'Enter your GitHub token below, then click Publish again.';
+      ghTokenRow.style.display = '';
+      document.getElementById('ghTokenInput').focus();
+      return;
+    }
+    if(!lastMatchData){ publishStatus.textContent = 'Find a constellation match first.'; return; }
+    if(!constellationId) constellationId = generateConstellationId();
+    const name = document.getElementById('constellationName').value.trim() || 'Constellation';
+    lastMatchData.id = constellationId;
+    lastMatchData.name = name;
+
+    publishStatus.textContent = 'Publishing…';
+    try{
+      const mapPath = `maps/${constellationId}.json`;
+      const existingMap = await ghGetFile(mapPath);
+      await ghPutFile(mapPath, JSON.stringify(lastMatchData, null, 2), `Publish constellation: ${name}`, existingMap?.sha);
+
+      const manifestPath = 'maps/manifest.json';
+      const manifestFile = await ghGetFile(manifestPath);
+      let list = [];
+      if(manifestFile){ try{ list = JSON.parse(manifestFile.content); }catch(err){ list = []; } }
+      const idx = list.findIndex(m => m.file === `${constellationId}.json`);
+      if(idx>=0) list[idx].name = name;
+      else list.push({ file: `${constellationId}.json`, name });
+      await ghPutFile(manifestPath, JSON.stringify(list, null, 2), `Add ${name} to manifest`, manifestFile?.sha);
+
+      const viewerLink = VIEWER_BASE_URL + '?map=' + encodeURIComponent('../maps/' + constellationId + '.json');
+      publishStatus.innerHTML = `Published — live in about a minute at <a href="${viewerLink}" target="_blank" style="color:var(--accent);">${escapeXml(name)}</a>.`;
+    }catch(err){
+      publishStatus.textContent = 'Publish failed: ' + err.message;
+    }
   });
 
   document.getElementById('downloadPng').addEventListener('click', () => {
@@ -2259,8 +2371,6 @@
   let posterPanelOpen = false;
   document.getElementById('posterBtn').addEventListener('click', () => {
     if(!lastBestMatch){ return; }
-    const titleInput = document.getElementById('posterTitle');
-    if(!titleInput.value) titleInput.value = lastLoadedFileName || '';
     posterPanelOpen = !posterPanelOpen;
     posterPanel.style.display = posterPanelOpen ? '' : 'none';
     if(posterPanelOpen) posterPanel.scrollIntoView({behavior:'auto', block:'start'});
@@ -2272,12 +2382,14 @@
 
   function generatePoster(){
     if(!lastBestMatch){ posterStatus.textContent = 'Find a constellation match first.'; return; }
-    const rawTitle = document.getElementById('posterTitle').value.trim() || 'Constellation';
+    const rawTitle = document.getElementById('constellationName').value.trim() || 'Constellation';
     const title = escapeXml(rawTitle);
     const zoomFactor = parseFloat(document.getElementById('posterZoom').value) || 1;
 
-    const safeFileName = rawTitle.replace(/[^A-Za-z0-9_-]/g, '_') || 'Constellation';
-    const mapUrl = VIEWER_BASE_URL + '?map=' + encodeURIComponent('../maps/' + safeFileName + '.json');
+    // Links to this constellation's stable, unique ID — not a name-derived
+    // slug — so it keeps resolving even if the name is edited or duplicated
+    // elsewhere, as long as it's been published (see "Publish in Viewer").
+    const mapUrl = VIEWER_BASE_URL + '?map=' + encodeURIComponent('../maps/' + (constellationId||'constellation') + '.json');
 
     lastPosterLayers = buildPosterSvg(lastBestMatch, lastMstEdges, lastDrawingLayer, title, mapUrl, lastBgColor, zoomFactor);
     lastPosterSvg = lastPosterLayers.full;
@@ -2289,7 +2401,7 @@
   }
   document.getElementById('posterGenBtn').addEventListener('click', generatePoster);
 
-  // Title and size-slider edits re-render live (debounced) once a poster has
+  // Name and size-slider edits re-render live (debounced) once a poster has
   // already been generated at least once — no need to keep re-pressing
   // Generate for every small adjustment.
   let posterLiveTimer = null;
@@ -2298,7 +2410,7 @@
     if(posterLiveTimer) clearTimeout(posterLiveTimer);
     posterLiveTimer = setTimeout(generatePoster, 150);
   }
-  document.getElementById('posterTitle').addEventListener('input', schedulePosterLiveUpdate);
+  document.getElementById('constellationName').addEventListener('input', schedulePosterLiveUpdate);
   document.getElementById('posterZoom').addEventListener('input', () => {
     document.getElementById('posterZoomVal').textContent = parseFloat(document.getElementById('posterZoom').value).toFixed(2)+'×';
     schedulePosterLiveUpdate();
@@ -2309,7 +2421,7 @@
     const blob = new Blob([lastPosterSvg], {type:'image/svg+xml'});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = (document.getElementById('posterTitle').value.trim() || 'poster') + '-poster.svg';
+    a.download = (document.getElementById('constellationName').value.trim() || 'poster') + '-poster.svg';
     a.click();
     URL.revokeObjectURL(a.href);
   });
@@ -2341,7 +2453,7 @@
     c.toBlob(blob => {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = (document.getElementById('posterTitle').value.trim() || 'poster') + '-poster.png';
+      a.download = (document.getElementById('constellationName').value.trim() || 'poster') + '-poster.png';
       a.click();
       URL.revokeObjectURL(a.href);
     });
