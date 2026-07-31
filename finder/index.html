@@ -81,7 +81,7 @@
       <span style="font-size:12px; color:var(--text);">Invert colors</span>
     </label>
     <label>Line width <span class="val" id="lineWidthVal">0</span></label>
-    <input type="range" id="lineWidthSlider" min="-6" max="6" step="1" value="0">
+    <input type="range" id="lineWidthSlider" min="-10" max="10" step="1" value="0">
 
     <label>Light-intensity weight <span class="val" id="weightVal"></span></label>
     <input type="range" id="weight" min="0" max="1.5" step="0.05" value="0.5">
@@ -260,7 +260,12 @@
   const weightEl = document.getElementById('weight');
   const weightValEl = document.getElementById('weightVal');
 
-  const MAX_DIM = 480;
+  // Higher than it looks like it needs to be: this is the resolution the
+  // line-width slider actually operates at, and it's what the poster's
+  // drawing layer gets scaled up FROM — at the old 480px, one slider step
+  // (exactly 1 pixel here) became several pixels once stretched across a
+  // ~1000-1400px poster, making each step look coarser than "one pixel".
+  const MAX_DIM = 800;
   const CHART_SIZE = 720;
   let sourceLoaded = false;
   let lastSvgString = '';
@@ -272,7 +277,7 @@
   let lastLoadedFileName = '';
   let originalPhotoImg = null; // the finished line drawing as uploaded, kept aside so Invert/Line width always recompute from a clean copy instead of compounding
   let invertOn = false;
-  let lineWidthValue = 0; // -6..6, 0 = unchanged; negative = thinner (erode), positive = thicker (dilate)
+  let lineWidthValue = 0; // -10..10, 0 = unchanged; negative = thinner (erode), positive = thicker (dilate)
   const FINDER_SIZE = 720;
 
   function stripExtension(name){
