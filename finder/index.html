@@ -82,15 +82,6 @@
     <label>Line width <span class="val" id="lineWidthVal">0</span></label>
     <input type="range" id="lineWidthSlider" min="-10" max="10" step="1" value="0">
 
-    <!-- Optional: for a real photo rather than a ready-made line drawing.
-         Landmark detection below always runs on whatever this produces. -->
-    <label style="margin-top:14px;">Sketch — line detail <span class="val" id="sketchDetailVal"></span></label>
-    <input type="range" id="sketchDetail" min="1" max="14" step="1" value="5">
-    <label>Sketch — contrast <span class="val" id="sketchContrastVal"></span></label>
-    <input type="range" id="sketchContrast" min="0.5" max="3" step="0.05" value="1.4">
-    <div class="canvasWrap" id="sketchPreviewWrap" style="min-height:0; max-height:120px;"><canvas id="sketchPreviewCanvas"></canvas></div>
-    <div class="btnrow"><button id="applySketchBtn">Apply sketch to image</button></div>
-
     <label>Light-intensity weight <span class="val" id="weightVal"></span></label>
     <input type="range" id="weight" min="0" max="1.5" step="0.05" value="0.5">
 
@@ -132,11 +123,7 @@
         <div class="canvasWrap" id="autoCanvasWrap"><canvas id="autoCanvas"></canvas></div>
         <label style="margin-top:10px;">Marker size <span class="val" id="dotSizeVal">1.0×</span></label>
         <input type="range" id="dotSizeSlider" min="0.4" max="2.5" step="0.05" value="1">
-        <div class="btnrow">
-          <button class="primary" id="findStarsBtn">Find matching stars</button>
-          <button id="autoResetBtn" disabled>Reset to auto-detected</button>
-        </div>
-        <p class="hint" style="margin:6px 0 0;">Editing points is instant; searching the sky for a match takes a few seconds, so it only runs when you ask.</p>
+        <div class="btnrow"><button id="autoResetBtn" disabled>Reset to auto-detected</button></div>
         <div class="stats" id="autoStatus"></div>
       </div>
     </div>
@@ -519,98 +506,6 @@
     return { w, h, gx, gy };
   }
 
-  // ---------- local photo -> pencil-sketch filter (replaces imagetosketch.com) ----------
-  // Separable box blur (horizontal then vertical pass) — a fast, dependency-free
-  // approximation of a Gaussian blur, good enough for a sketch effect.
-  function boxBlurGray(src, w, h, radius){
-    if(radius < 1) return src.slice();
-    const size = radius*2+1;
-    const tmp = new Float32Array(w*h), out = new Float32Array(w*h);
-    for(let y=0;y<h;y++){
-      const row = y*w;
-      let sum = 0;
-      for(let x=-radius;x<=radius;x++) sum += src[row + Math.min(w-1, Math.max(0, x))];
-      for(let x=0;x<w;x++){
-        tmp[row+x] = sum/size;
-        sum += src[row + Math.min(w-1, x+radius+1)] - src[row + Math.max(0, x-radius)];
-      }
-    }
-    for(let x=0;x<w;x++){
-      let sum = 0;
-      for(let y=-radius;y<=radius;y++) sum += tmp[Math.min(h-1, Math.max(0, y))*w + x];
-      for(let y=0;y<h;y++){
-        out[y*w+x] = sum/size;
-        sum += tmp[Math.min(h-1, y+radius+1)*w+x] - tmp[Math.max(0, y-radius)*w+x];
-      }
-    }
-    return out;
-  }
-
-  // 3-pass box blur approximates a Gaussian blur of the given standard
-  // deviation — cheap, no separate kernel-generation code needed, and good
-  // enough for an artistic filter (this doesn't need to be metrologically exact).
-  function blur3pass(src, w, h, radius){
-    let out = src;
-    for(let pass=0; pass<3; pass++) out = boxBlurGray(out, w, h, radius);
-    return out;
-  }
-
-  // XDoG (eXtended Difference-of-Gaussians) — the standard technique behind
-  // most "photo to pencil/ink sketch" filters, and a real upgrade over a
-  // simple color-dodge blend: it naturally suppresses sensor/texture noise
-  // (two Gaussians close in scale cancel out flat regions) while producing
-  // continuous, connected line strokes at genuine edges, with a soft,
-  // tunable falloff rather than speckled binary edges. detailAmount maps to
-  // the blur scale (bigger = coarser/thicker strokes); contrastAmount maps to
-  // the sharpness of the threshold (higher = crisper, more binary line art;
-  // lower = softer, shaded pencil look). Output is white lines on black by
-  // construction, matching this app's aesthetic.
-  function buildSketchImageData(imgData, detailAmount, contrastAmount){
-    const w = imgData.width, h = imgData.height, data = imgData.data;
-    const n = w*h;
-    const gray = new Float32Array(n);
-    for(let i=0,p=0;i<data.length;i+=4,p++) gray[p] = (0.299*data[i]+0.587*data[i+1]+0.114*data[i+2])/255;
-
-    // Blur radius is defined relative to image size (not a fixed pixel count):
-    // otherwise the same "detail" setting looks far glowier on the small
-    // preview canvas than on the full-resolution image the "Apply" button
-    // actually writes out, since the same absolute radius covers a much
-    // bigger fraction of a smaller image.
-    const dimScale = Math.max(w,h)/480;
-    const sigma = Math.max(0.4, detailAmount*0.5) * dimScale;
-    const k = 2.2, tau = 0.95, phi = Math.max(4, contrastAmount*24), epsilon = 0;
-    // The two blur radii MUST differ by construction — rounding sigma and
-    // sigma*k to integer box-blur radii can otherwise land on the SAME
-    // integer (especially at small sigma), making the two Gaussians
-    // identical. When that happens the whole difference-of-Gaussians signal
-    // degenerates to a uniformly-positive constant and every pixel reads as
-    // "flat" — this was a real bug (verified: it produced an entirely black
-    // output regardless of contrast), not just a tuning issue.
-    const r1 = Math.max(1, Math.round(sigma));
-    const r2 = Math.max(r1+2, Math.round(sigma*k));
-    const g1 = blur3pass(gray, w, h, r1);
-    const g2 = blur3pass(gray, w, h, r2);
-
-    // A DoG signal is smooth by nature (it's the difference of two blurred
-    // images), so mapping it straight to a gray value — as this used to do —
-    // paints every edge as a soft gradient halo instead of a clean line.
-    // Snapping through a narrow threshold band here keeps the blur useful for
-    // finding edges (and controlling line thickness) while making the actual
-    // output solid black/white, like real pencil-sketch line art.
-    const THRESH = 60, AA = 14;
-    const out = new ImageData(w, h);
-    for(let p=0;p<n;p++){
-      const u = g1[p] - tau*g2[p];
-      const t = u >= epsilon ? 1 : Math.max(0, Math.min(1, 1 + Math.tanh(phi*(u-epsilon))));
-      const raw = 255*(1-t); // invert: edges (t≈0) -> white, flat regions (t≈1) -> black
-      const val = raw <= THRESH-AA ? 0 : raw >= THRESH+AA ? 255 : ((raw-(THRESH-AA))/(2*AA))*255;
-      const idx = p*4;
-      out.data[idx]=out.data[idx+1]=out.data[idx+2]=val;
-      out.data[idx+3]=255;
-    }
-    return out;
-  }
-
   // ---------- local color inversion (replaces pinetools.com/invert-image-colors) ----------
   function invertImageData(imgData){
     const out = new ImageData(imgData.width, imgData.height);
@@ -777,7 +672,7 @@
   document.getElementById('dotSizeSlider').addEventListener('input', e => {
     dotSizeMultiplier = parseFloat(e.target.value);
     document.getElementById('dotSizeVal').textContent = dotSizeMultiplier.toFixed(2)+'×';
-    compositeDots();
+    compositeDotsAndProcess();
   });
 
   function renderPointsCanvas(){
@@ -805,9 +700,11 @@
   }
 
   // Draws cleanBackdropCanvas + the current dots onto srcCanvas (what the
-  // matching pipeline reads) and refreshes the Points preview. Fast and
-  // synchronous — safe to call on every click while placing/editing dots.
-  function compositeDots(){
+  // matching pipeline reads), refreshes the Points preview, and kicks off a
+  // fresh sky-matching search. The search itself takes a few seconds, but it
+  // runs in a Worker (see findBestStarMatchesAsync) so it never blocks this —
+  // point edits stay instant and the match just updates live once ready.
+  function compositeDotsAndProcess(){
     const w = cleanBackdropCanvas.width, h = cleanBackdropCanvas.height;
     if(!w || !h) return;
     srcCanvas.width = w; srcCanvas.height = h;
@@ -822,14 +719,6 @@
     sourceLoaded = true;
     dropHint.style.display = 'none';
     renderPointsCanvas();
-  }
-
-  // Same, but also kicks off the sky-matching search — that search takes
-  // several seconds AND blocks the page while it runs, so this is only used
-  // after a genuinely new/adjusted image (upload, sample pattern, sketch,
-  // invert, line width), never on individual dot edits (see compositeDots).
-  function compositeDotsAndProcess(){
-    compositeDots();
     scheduleProcess();
   }
 
@@ -847,79 +736,14 @@
       const r = Math.max(5, Math.min(11, 5+gradientMagnitudeAt(gradInfo, x, y)/40));
       autoDots.push({ x, y, r });
     }
-    compositeDots();
+    compositeDotsAndProcess();
   });
 
   document.getElementById('autoResetBtn').addEventListener('click', () => {
     autoDots = autoDetectedDots.map(d => ({...d}));
-    compositeDots();
+    compositeDotsAndProcess();
   });
 
-  // The sky-matching search is genuinely slow (a real star-catalog search,
-  // several seconds and it blocks the page while running) — point editing
-  // above stays instant, but re-running the search itself is a deliberate,
-  // explicit step rather than something that fires on every click.
-  document.getElementById('findStarsBtn').addEventListener('click', () => {
-    if(processTimer) clearTimeout(processTimer);
-    process();
-  });
-
-  // Builds the pencil-sketch version of an image at a given max dimension,
-  // using whatever the detail/contrast sliders are currently set to. Shared
-  // by the live preview (small, fast) and the full-resolution "Apply" step.
-  function buildSketchCanvasFromImage(img, maxDim){
-    const iw = img.naturalWidth||img.width, ih = img.naturalHeight||img.height;
-    const scale = Math.min(1, maxDim/Math.max(iw,ih));
-    const w = Math.max(1,Math.round(iw*scale)), h = Math.max(1,Math.round(ih*scale));
-    const srcC = document.createElement('canvas');
-    srcC.width=w; srcC.height=h;
-    srcC.getContext('2d').drawImage(img,0,0,w,h);
-    const imgData = srcC.getContext('2d').getImageData(0,0,w,h);
-    const detail = parseInt(document.getElementById('sketchDetail').value,10);
-    const contrast = parseFloat(document.getElementById('sketchContrast').value);
-    const sketchData = buildSketchImageData(imgData, detail, contrast);
-    const outCanvas = document.createElement('canvas');
-    outCanvas.width=w; outCanvas.height=h;
-    outCanvas.getContext('2d').putImageData(sketchData,0,0);
-    return outCanvas;
-  }
-
-  let sketchPreviewTimer = null;
-  function updateSketchPreview(){
-    if(!cleanBackdropCanvas.width) return;
-    const canvas = buildSketchCanvasFromImage(cleanBackdropCanvas, 480);
-    const previewCanvas = document.getElementById('sketchPreviewCanvas');
-    previewCanvas.width = canvas.width; previewCanvas.height = canvas.height;
-    previewCanvas.getContext('2d').drawImage(canvas, 0, 0);
-  }
-  function scheduleSketchPreview(){
-    if(sketchPreviewTimer) clearTimeout(sketchPreviewTimer);
-    sketchPreviewTimer = setTimeout(updateSketchPreview, 150);
-  }
-  document.getElementById('sketchDetail').addEventListener('input', () => {
-    document.getElementById('sketchDetailVal').textContent = document.getElementById('sketchDetail').value;
-    scheduleSketchPreview();
-  });
-  document.getElementById('sketchContrast').addEventListener('input', () => {
-    document.getElementById('sketchContrastVal').textContent = parseFloat(document.getElementById('sketchContrast').value).toFixed(2);
-    scheduleSketchPreview();
-  });
-  document.getElementById('sketchDetailVal').textContent = document.getElementById('sketchDetail').value;
-  document.getElementById('sketchContrastVal').textContent = parseFloat(document.getElementById('sketchContrast').value).toFixed(2);
-
-  document.getElementById('applySketchBtn').addEventListener('click', () => {
-    if(!cleanBackdropCanvas.width) return;
-    const canvas = buildSketchCanvasFromImage(cleanBackdropCanvas, Math.min(1400, Math.max(cleanBackdropCanvas.width, cleanBackdropCanvas.height)));
-    // The sketch becomes the new baseline: reset invert/line width (they'd
-    // otherwise double-apply on top of a source that already reflects them).
-    originalPhotoImg = canvas;
-    invertOn = false; lineWidthValue = 0;
-    document.getElementById('invertToggle').checked = false;
-    document.getElementById('lineWidthSlider').value = 0;
-    document.getElementById('lineWidthVal').textContent = '0';
-    recomputeActiveImage(true);
-    autoStatus.textContent = 'Sketch applied to the active image.';
-  });
 
   // Runs whenever the active image is genuinely new (upload, sample pattern,
   // applied sketch) — NOT on every invert/line-width tweak, so manual point
@@ -1002,7 +826,6 @@
       await runDetection();
     }
     compositeDotsAndProcess();
-    updateSketchPreview();
   }
 
   document.getElementById('invertToggle').addEventListener('change', e => {
@@ -1126,33 +949,12 @@
   // way) keep the exact orientation and handedness the dots were drawn in.
   // (sIm is kept at 0 so this still uses the same {sRe,sIm,tx,ty} shape as a
   // full similarity transform — applyTransform/applyInverseTransform work unchanged.)
-  function fitScaleTranslate(A, B){
-    const n = A.length;
-    let Ax=0,Ay=0,Bx=0,By=0;
-    for(let i=0;i<n;i++){ Ax+=A[i].x; Ay+=A[i].y; Bx+=B[i].x; By+=B[i].y; }
-    Ax/=n; Ay/=n; Bx/=n; By/=n;
-    let num=0, den=0;
-    for(let i=0;i<n;i++){
-      const ax=A[i].x-Ax, ay=A[i].y-Ay, bx=B[i].x-Bx, by=B[i].y-By;
-      num += ax*bx + ay*by;
-      den += ax*ax + ay*ay;
-    }
-    if(den < 1e-12) return null;
-    const sRe = num/den;
-    const tx = Bx - sRe*Ax, ty = By - sRe*Ay;
-    let residual = 0, spread = 0;
-    for(let i=0;i<n;i++){
-      const px = sRe*A[i].x + tx, py = sRe*A[i].y + ty;
-      const dx = px-B[i].x, dy = py-B[i].y;
-      residual += dx*dx+dy*dy;
-      spread += (B[i].x-Bx)**2 + (B[i].y-By)**2;
-    }
-    return { sRe, sIm:0, tx, ty, residual: spread>1e-9 ? residual/spread : residual };
-  }
-
-  function applyTransform(pt, fit){
-    return { x: fit.sRe*pt.x - fit.sIm*pt.y + fit.tx, y: fit.sIm*pt.x + fit.sRe*pt.y + fit.ty };
-  }
+  // fitScaleTranslate/applyTransform/centerAndScale/greedyAssign/
+  // matchClusterToTarget/intensityResidual/angularSepDeg/maxOverlapWithRegistry/
+  // findBestStarMatches used to live here, but they're pure geometry/search
+  // code with no DOM dependency and nothing else on this thread called them —
+  // they now run inside starSearchWorker (see below) so the multi-second
+  // catalog search never blocks the page.
 
   // Inverse of applyTransform: fit maps gnomonic sky-space -> input pixel-space,
   // so this maps a pixel-space point back to that gnomonic tangent plane.
@@ -1174,160 +976,213 @@
     return { ra: raR*180/Math.PI, dec: decR*180/Math.PI };
   }
 
-  function centerAndScale(pts){
-    let cx=0,cy=0; for(const p of pts){ cx+=p.x; cy+=p.y; } cx/=pts.length; cy/=pts.length;
-    let rms=0; for(const p of pts){ rms += (p.x-cx)**2+(p.y-cy)**2; } rms = Math.sqrt(rms/pts.length) || 1;
-    return pts.map(p => ({x:(p.x-cx)/rms, y:(p.y-cy)/rms}));
-  }
-
-  function greedyAssign(targetPts, srcPts){
-    if(srcPts.length < targetPts.length) return null;
-    const pairs = [];
-    for(let i=0;i<targetPts.length;i++){
-      for(let j=0;j<srcPts.length;j++){
-        const dx=targetPts[i].x-srcPts[j].x, dy=targetPts[i].y-srcPts[j].y;
-        pairs.push([dx*dx+dy*dy, i, j]);
+  // ---------- star-matching search: runs in a Worker ----------
+  // findBestStarMatches searches the WHOLE bright-star catalog (1600+ stars,
+  // O(n²) pairwise separations) for the best-fitting patch of sky — every
+  // star is tried as a neighborhood anchor, candidates near it are pooled and
+  // fit against the target pattern (fixed orientation, no rotation/mirror
+  // search, so the drawn orientation — up stays up, left stays left — is
+  // preserved). That search genuinely takes seconds, and being synchronous
+  // it would freeze the whole page for that long. Running it in a Worker
+  // keeps the main thread (and point editing) responsive regardless of how
+  // long a search takes; only the worker's own source below runs off-thread,
+  // everything else in this file is unchanged.
+  const STAR_SEARCH_WORKER_SRC = `
+    function degToRad(d){ return d*Math.PI/180; }
+    function gnomonic(ra, dec, ra0, dec0){
+      const raR=degToRad(ra), decR=degToRad(dec), ra0R=degToRad(ra0), dec0R=degToRad(dec0);
+      const cosc = Math.sin(dec0R)*Math.sin(decR) + Math.cos(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R);
+      if(cosc<=0.01) return null;
+      return {
+        x: Math.cos(decR)*Math.sin(raR-ra0R)/cosc,
+        y: (Math.cos(dec0R)*Math.sin(decR) - Math.sin(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R))/cosc,
+      };
+    }
+    function fitScaleTranslate(A, B){
+      const n = A.length;
+      let Ax=0,Ay=0,Bx=0,By=0;
+      for(let i=0;i<n;i++){ Ax+=A[i].x; Ay+=A[i].y; Bx+=B[i].x; By+=B[i].y; }
+      Ax/=n; Ay/=n; Bx/=n; By/=n;
+      let num=0, den=0;
+      for(let i=0;i<n;i++){
+        const ax=A[i].x-Ax, ay=A[i].y-Ay, bx=B[i].x-Bx, by=B[i].y-By;
+        num += ax*bx + ay*by;
+        den += ax*ax + ay*ay;
       }
+      if(den < 1e-12) return null;
+      const sRe = num/den;
+      const tx = Bx - sRe*Ax, ty = By - sRe*Ay;
+      let residual = 0, spread = 0;
+      for(let i=0;i<n;i++){
+        const px = sRe*A[i].x + tx, py = sRe*A[i].y + ty;
+        const dx = px-B[i].x, dy = py-B[i].y;
+        residual += dx*dx+dy*dy;
+        spread += (B[i].x-Bx)**2 + (B[i].y-By)**2;
+      }
+      return { sRe, sIm:0, tx, ty, residual: spread>1e-9 ? residual/spread : residual };
     }
-    pairs.sort((a,b)=>a[0]-b[0]);
-    const assignment = new Array(targetPts.length).fill(-1);
-    const usedSrc = new Array(srcPts.length).fill(false);
-    const usedTarget = new Array(targetPts.length).fill(false);
-    let count = 0;
-    for(const [,i,j] of pairs){
-      if(usedTarget[i] || usedSrc[j]) continue;
-      assignment[i]=j; usedTarget[i]=true; usedSrc[j]=true; count++;
-      if(count===targetPts.length) break;
+    function applyTransform(pt, fit){
+      return { x: fit.sRe*pt.x - fit.sIm*pt.y + fit.tx, y: fit.sIm*pt.x + fit.sRe*pt.y + fit.ty };
     }
-    return count===targetPts.length ? assignment : null;
-  }
+    function centerAndScale(pts){
+      let cx=0,cy=0; for(const p of pts){ cx+=p.x; cy+=p.y; } cx/=pts.length; cy/=pts.length;
+      let rms=0; for(const p of pts){ rms += (p.x-cx)**2+(p.y-cy)**2; } rms = Math.sqrt(rms/pts.length) || 1;
+      return pts.map(p => ({x:(p.x-cx)/rms, y:(p.y-cy)/rms}));
+    }
+    function greedyAssign(targetPts, srcPts){
+      if(srcPts.length < targetPts.length) return null;
+      const pairs = [];
+      for(let i=0;i<targetPts.length;i++){
+        for(let j=0;j<srcPts.length;j++){
+          const dx=targetPts[i].x-srcPts[j].x, dy=targetPts[i].y-srcPts[j].y;
+          pairs.push([dx*dx+dy*dy, i, j]);
+        }
+      }
+      pairs.sort((a,b)=>a[0]-b[0]);
+      const assignment = new Array(targetPts.length).fill(-1);
+      const usedSrc = new Array(srcPts.length).fill(false);
+      const usedTarget = new Array(targetPts.length).fill(false);
+      let count = 0;
+      for(const [,i,j] of pairs){
+        if(usedTarget[i] || usedSrc[j]) continue;
+        assignment[i]=j; usedTarget[i]=true; usedSrc[j]=true; count++;
+        if(count===targetPts.length) break;
+      }
+      return count===targetPts.length ? assignment : null;
+    }
+    function matchClusterToTarget(targetPts, clusterPts){
+      const tN = centerAndScale(targetPts);
+      const sN = centerAndScale(clusterPts);
+      let assignment = greedyAssign(tN, sN);
+      if(!assignment) return null;
+      let fit = fitScaleTranslate(assignment.map(idx => clusterPts[idx]), targetPts);
+      if(!fit) return null;
+      for(let iter=0; iter<6; iter++){
+        const transformed = clusterPts.map(p => applyTransform(p, fit));
+        const newAssignment = greedyAssign(targetPts, transformed);
+        if(!newAssignment) break;
+        const newFit = fitScaleTranslate(newAssignment.map(idx => clusterPts[idx]), targetPts);
+        if(!newFit) break;
+        fit = newFit; assignment = newAssignment;
+      }
+      return { fit, assignment, src: clusterPts };
+    }
+    function intensityResidual(targetIntensities, mags){
+      const brightness = mags.map(m => Math.pow(10, -0.4*m));
+      const z = arr => {
+        const n=arr.length; let mean=0; for(const v of arr) mean+=v; mean/=n;
+        let sd=0; for(const v of arr) sd+=(v-mean)**2; sd=Math.sqrt(sd/n)||1;
+        return arr.map(v => (v-mean)/sd);
+      };
+      const a=z(targetIntensities), b=z(brightness);
+      let dot=0,na=0,nb=0;
+      for(let i=0;i<a.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
+      const corr = (na>1e-9&&nb>1e-9) ? dot/Math.sqrt(na*nb) : 0;
+      return (1-corr)/2;
+    }
+    function angularSepDeg(ra1,dec1,ra2,dec2){
+      const r1=degToRad(ra1), d1=degToRad(dec1), r2=degToRad(ra2), d2=degToRad(dec2);
+      const cosc = Math.sin(d1)*Math.sin(d2)+Math.cos(d1)*Math.cos(d2)*Math.cos(r1-r2);
+      return Math.acos(Math.max(-1,Math.min(1,cosc)))*180/Math.PI;
+    }
+    function maxOverlapWithRegistry(matchedStars, registry){
+      if(!registry || !registry.length) return 0;
+      const names = matchedStars.map(s=>s.name);
+      let max = 0;
+      for(const entry of registry){
+        let overlap = 0;
+        for(const nm of names) if(entry.stars.has(nm)) overlap++;
+        max = Math.max(max, overlap/names.length);
+      }
+      return max;
+    }
+    function findBestStarMatches(targetPts, intensities, intensityWeight, registry, stars){
+      if(!stars || !stars.length) return [];
+      const n = targetPts.length;
+      const RADIUS_DEG = 30;
+      const NEARBY_CAP = 40;
 
-  // No rotation/mirror search: a single fixed-orientation initial guess (nearest-
-  // neighbor after centering+scaling both point sets), then ICP-refined. This
-  // keeps whatever orientation the dots were drawn in — up stays up, left stays left.
-  function matchClusterToTarget(targetPts, clusterPts){
-    const tN = centerAndScale(targetPts);
-    const sN = centerAndScale(clusterPts);
-    let assignment = greedyAssign(tN, sN);
-    if(!assignment) return null;
-    let fit = fitScaleTranslate(assignment.map(idx => clusterPts[idx]), targetPts);
-    if(!fit) return null;
-    for(let iter=0; iter<6; iter++){
-      const transformed = clusterPts.map(p => applyTransform(p, fit));
-      const newAssignment = greedyAssign(targetPts, transformed);
-      if(!newAssignment) break;
-      const newFit = fitScaleTranslate(newAssignment.map(idx => clusterPts[idx]), targetPts);
-      if(!newFit) break;
-      fit = newFit; assignment = newAssignment;
-    }
-    return { fit, assignment, src: clusterPts };
-  }
+      const results = [];
+      for(let a=0; a<stars.length; a++){
+        const anchor = stars[a];
+        const nearby = [];
+        for(let b=0;b<stars.length;b++){
+          const sep = angularSepDeg(anchor.ra, anchor.dec, stars[b].ra, stars[b].dec);
+          if(sep<=RADIUS_DEG) nearby.push({s:stars[b], sep});
+        }
+        if(nearby.length < n) continue;
+        nearby.sort((x,y)=>x.sep-y.sep);
 
-  // Correlates target blob sizes ("light intensity") against the matched stars'
-  // real magnitudes. 0 = perfectly correlated (biggest dot -> brightest star), 1 = anti-correlated.
-  function intensityResidual(targetIntensities, mags){
-    const brightness = mags.map(m => Math.pow(10, -0.4*m));
-    const z = arr => {
-      const n=arr.length; let mean=0; for(const v of arr) mean+=v; mean/=n;
-      let sd=0; for(const v of arr) sd+=(v-mean)**2; sd=Math.sqrt(sd/n)||1;
-      return arr.map(v => (v-mean)/sd);
+        const projected = [];
+        for(const {s} of nearby.slice(0, NEARBY_CAP)){
+          const p = gnomonic(s.ra, s.dec, anchor.ra, anchor.dec);
+          if(p) projected.push({x:p.x, y:p.y, name:s.name, con:s.con, mag:s.mag, ra:s.ra, dec:s.dec});
+        }
+        if(projected.length < n) continue;
+
+        const result = matchClusterToTarget(targetPts, projected);
+        if(!result) continue;
+        const matchedStars = result.assignment.map(idx => result.src[idx]);
+        const intRes = intensityResidual(intensities, matchedStars.map(s=>s.mag));
+        const combinedScore = result.fit.residual + intensityWeight*intRes;
+        results.push({ anchorName: anchor.name, fit: result.fit, tangentRa: anchor.ra, tangentDec: anchor.dec, matchedStars, intensityResidual: intRes, combinedScore });
+      }
+      results.sort((a,b) => a.combinedScore-b.combinedScore);
+
+      const kept = [];
+      for(const r of results){
+        const names = new Set(r.matchedStars.map(s=>s.name));
+        const dup = kept.some(k => {
+          let overlap=0; for(const nm of names) if(k._names.has(nm)) overlap++;
+          return overlap/names.size >= 0.6;
+        });
+        if(!dup){ r._names = names; kept.push(r); }
+        if(kept.length>=15) break;
+      }
+      kept.forEach(r => delete r._names);
+
+      const SIMILARITY_LIMIT = 0.7;
+      kept.forEach(r => { r.registrySimilarity = maxOverlapWithRegistry(r.matchedStars, registry); });
+      const underLimit = kept.filter(r => r.registrySimilarity < SIMILARITY_LIMIT);
+      if(underLimit.length) return underLimit;
+      return kept.slice().sort((a,b) => a.registrySimilarity-b.registrySimilarity || a.combinedScore-b.combinedScore);
+    }
+    self.onmessage = (e) => {
+      const { id, targetPts, intensities, weight, registry, stars } = e.data;
+      let results;
+      try{ results = findBestStarMatches(targetPts, intensities, weight, registry, stars); }
+      catch(err){ self.postMessage({ id, error: String(err) }); return; }
+      self.postMessage({ id, results });
     };
-    const a=z(targetIntensities), b=z(brightness);
-    let dot=0,na=0,nb=0;
-    for(let i=0;i<a.length;i++){ dot+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; }
-    const corr = (na>1e-9&&nb>1e-9) ? dot/Math.sqrt(na*nb) : 0;
-    return (1-corr)/2;
+  `;
+  let starSearchWorker = null;
+  let starSearchReqId = 0;
+  const starSearchPending = new Map();
+  function getStarSearchWorker(){
+    if(starSearchWorker) return starSearchWorker;
+    const blob = new Blob([STAR_SEARCH_WORKER_SRC], {type:'application/javascript'});
+    starSearchWorker = new Worker(URL.createObjectURL(blob));
+    starSearchWorker.onmessage = (e) => {
+      const { id, results, error } = e.data;
+      const pending = starSearchPending.get(id);
+      if(!pending) return;
+      starSearchPending.delete(id);
+      if(error) pending.reject(new Error(error)); else pending.resolve(results);
+    };
+    starSearchWorker.onerror = (e) => {
+      // Fails every still-pending request rather than hanging forever.
+      for(const [, pending] of starSearchPending) pending.reject(new Error(e.message||'star search worker error'));
+      starSearchPending.clear();
+    };
+    return starSearchWorker;
   }
-
-  function angularSepDeg(ra1,dec1,ra2,dec2){
-    const r1=degToRad(ra1), d1=degToRad(dec1), r2=degToRad(ra2), d2=degToRad(dec2);
-    const cosc = Math.sin(d1)*Math.sin(d2)+Math.cos(d1)*Math.cos(d2)*Math.cos(r1-r2);
-    return Math.acos(Math.max(-1,Math.min(1,cosc)))*180/Math.PI;
-  }
-
-  // Searches the WHOLE bright-star catalog for the best-fitting patch of sky —
-  // not confined to any single IAU constellation's traditional membership. Every
-  // bright star is tried as a neighborhood anchor; stars within radius of it are
-  // pooled and fit against the target pattern (fixed orientation, see
-  // matchClusterToTarget). Combines geometric accuracy with light-intensity
-  // correlation into one score and returns every candidate sorted best-first.
-  // How much of `matchedStars` overlaps with any ALREADY-PUBLISHED constellation
-  // (see loadStarRegistry) — used to steer away from near-duplicate whole
-  // patterns (typically caused by two photos having similar facial-feature
-  // geometry), not to penalize incidental reuse of one or two individual stars.
-  function maxOverlapWithRegistry(matchedStars, registry){
-    if(!registry || !registry.length) return 0;
-    const names = matchedStars.map(s=>s.name);
-    let max = 0;
-    for(const entry of registry){
-      let overlap = 0;
-      for(const nm of names) if(entry.stars.has(nm)) overlap++;
-      max = Math.max(max, overlap/names.length);
-    }
-    return max;
-  }
-
-  function findBestStarMatches(targetPts, intensities, intensityWeight, registry){
-    const stars = window.BRIGHT_STARS || [];
-    if(!stars.length) return [];
-    const n = targetPts.length;
-    const RADIUS_DEG = 30;
-    const NEARBY_CAP = 40;
-
-    const results = [];
-    for(let a=0; a<stars.length; a++){
-      const anchor = stars[a];
-      const nearby = [];
-      for(let b=0;b<stars.length;b++){
-        const sep = angularSepDeg(anchor.ra, anchor.dec, stars[b].ra, stars[b].dec);
-        if(sep<=RADIUS_DEG) nearby.push({s:stars[b], sep});
-      }
-      if(nearby.length < n) continue;
-      nearby.sort((x,y)=>x.sep-y.sep);
-
-      const projected = [];
-      for(const {s} of nearby.slice(0, NEARBY_CAP)){
-        const p = gnomonic(s.ra, s.dec, anchor.ra, anchor.dec);
-        if(p) projected.push({x:p.x, y:p.y, name:s.name, con:s.con, mag:s.mag, ra:s.ra, dec:s.dec});
-      }
-      if(projected.length < n) continue;
-
-      const result = matchClusterToTarget(targetPts, projected);
-      if(!result) continue;
-      const matchedStars = result.assignment.map(idx => result.src[idx]);
-      const intRes = intensityResidual(intensities, matchedStars.map(s=>s.mag));
-      const combinedScore = result.fit.residual + intensityWeight*intRes;
-      results.push({ anchorName: anchor.name, fit: result.fit, tangentRa: anchor.ra, tangentDec: anchor.dec, matchedStars, intensityResidual: intRes, combinedScore });
-    }
-    results.sort((a,b) => a.combinedScore-b.combinedScore);
-
-    // De-dupe near-identical candidates (same neighborhood, different anchor):
-    // skip any candidate sharing 60%+ of its matched stars with an already-kept, better one.
-    const kept = [];
-    for(const r of results){
-      const names = new Set(r.matchedStars.map(s=>s.name));
-      const dup = kept.some(k => {
-        let overlap=0; for(const nm of names) if(k._names.has(nm)) overlap++;
-        return overlap/names.size >= 0.6;
-      });
-      if(!dup){ r._names = names; kept.push(r); }
-      if(kept.length>=15) break;
-    }
-    kept.forEach(r => delete r._names);
-
-    // Soft diversity re-rank: `kept` is already best-fit-first. Prefer the best
-    // fit that ISN'T a near-total repeat of an existing published constellation
-    // (>=70% of its stars already used together elsewhere) — that threshold is
-    // deliberately high so sharing one or two individual stars with another
-    // constellation never costs anything; only "this is basically the same
-    // pattern as an existing one" does. If literally every candidate is that
-    // similar (an unlikely edge case), fall back to the least-similar one rather
-    // than failing outright.
-    const SIMILARITY_LIMIT = 0.7;
-    kept.forEach(r => { r.registrySimilarity = maxOverlapWithRegistry(r.matchedStars, registry); });
-    const underLimit = kept.filter(r => r.registrySimilarity < SIMILARITY_LIMIT);
-    if(underLimit.length) return underLimit;
-    return kept.slice().sort((a,b) => a.registrySimilarity-b.registrySimilarity || a.combinedScore-b.combinedScore);
+  function findBestStarMatchesAsync(targetPts, intensities, weight, registry){
+    const worker = getStarSearchWorker();
+    const id = ++starSearchReqId;
+    return new Promise((resolve, reject) => {
+      starSearchPending.set(id, {resolve, reject});
+      worker.postMessage({ id, targetPts, intensities, weight, registry, stars: window.BRIGHT_STARS||[] });
+    });
   }
 
   // Fetches the shared maps/manifest.json (the same registry the viewer's
@@ -2197,15 +2052,11 @@
   function scheduleProcess(){
     if(!sourceLoaded) return;
     if(processTimer) clearTimeout(processTimer);
-    // The actual sky-matching search this kicks off takes seconds, not
-    // milliseconds (it's searching a real star catalog) — now that point
-    // edits (add/remove/marker size) trigger this live instead of only once
-    // on an explicit "commit" step, a short debounce would fire that search
-    // after every single click while someone is still placing dots. A longer
-    // pause here only delays the (already slow) search until edits settle;
-    // it doesn't slow down the point-editing itself, which redraws
-    // synchronously elsewhere.
-    processTimer = setTimeout(process, 500);
+    // The sky-matching search itself runs in a Worker (see
+    // findBestStarMatchesAsync), so it never blocks the page — this debounce
+    // just avoids queuing a redundant search per click while several edits
+    // land in quick succession.
+    processTimer = setTimeout(process, 150);
   }
 
   async function process(){
@@ -2259,7 +2110,14 @@
     const registry = await loadStarRegistry();
     if(isStale()) return;
 
-    const results = findBestStarMatches(targetPts, intensities, weight, registry);
+    let results;
+    try{ results = await findBestStarMatchesAsync(targetPts, intensities, weight, registry); }
+    catch(err){
+      if(isStale()) return;
+      pathStats.textContent = 'The sky search failed to run — try again.';
+      return;
+    }
+    if(isStale()) return;
     if(!results.length){
       pathStats.textContent = 'No patch of sky has enough bright named stars near each other to match this many points. Try fewer points.';
       chartHolder.innerHTML = '';
