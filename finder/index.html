@@ -651,8 +651,16 @@
     if(!amount) return imgData;
     const w = imgData.width, h = imgData.height, data = imgData.data;
     const n = w*h;
+    // Binarize to pure black/white BEFORE dilating/eroding. Taking the
+    // min/max of raw (anti-aliased) luminance would drag partial gray edge
+    // values along with it, so a thickened/thinned line would show a faint
+    // gradient at its new edge instead of staying a solid line like the
+    // uploaded artwork.
     const lum = new Float32Array(n);
-    for(let i=0,p=0;i<data.length;i+=4,p++) lum[p] = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+    for(let i=0,p=0;i<data.length;i+=4,p++){
+      const v = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+      lum[p] = v > 127.5 ? 255 : 0;
+    }
     const radius = Math.abs(amount), dilate = amount > 0;
     const tmp = new Float32Array(n);
     for(let y=0;y<h;y++){
@@ -788,8 +796,14 @@
   let autoDetectedDots = [];    // snapshot of the raw auto-detected result, for "Reset"
   let dotSizeMultiplier = 1;    // live "Marker size" slider — applied at draw/composite time, not baked into stored r
 
+  // Always sample from the CURRENT active object (srcCanvas), which already
+  // reflects every edit made so far (line width, invert, applied sketch) —
+  // never fall back to the pristine originalPhotoImg here, or landmark
+  // detection, the sketch preview, and everything downstream of them
+  // (including the poster) end up built from the un-edited upload instead of
+  // what's actually on screen.
   function detectionSourceImg(){
-    return originalPhotoImg || (sourceLoaded ? srcCanvas : null);
+    return sourceLoaded ? srcCanvas : null;
   }
 
   let autoPanelOpen = false;
