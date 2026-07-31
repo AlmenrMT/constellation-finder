@@ -41,6 +41,8 @@
 
   .stage{ display:grid; grid-template-columns:280px 1fr; gap:14px; align-items:start; }
   @media (max-width: 950px){ .stage{grid-template-columns:1fr;} }
+  .pointsRow{ display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
+  @media (max-width: 950px){ .pointsRow{grid-template-columns:1fr;} }
   .card{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; text-align:center; }
   .card h3{margin:0 0 8px; font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;}
   .canvasWrap{
@@ -71,9 +73,6 @@
       <button class="primary" id="uploadBtn">Upload image</button>
       <button id="sampleBtn">Try sample pattern</button>
     </div>
-    <div class="btnrow">
-      <button id="autoDetectBtn">Auto-detect landmarks…</button>
-    </div>
     <input type="file" id="fileInput" accept="image/*">
 
     <label class="row" style="align-items:center; gap:6px; margin-top:14px;">
@@ -82,6 +81,15 @@
     </label>
     <label>Line width <span class="val" id="lineWidthVal">0</span></label>
     <input type="range" id="lineWidthSlider" min="-10" max="10" step="1" value="0">
+
+    <!-- Optional: for a real photo rather than a ready-made line drawing.
+         Landmark detection below always runs on whatever this produces. -->
+    <label style="margin-top:14px;">Sketch — line detail <span class="val" id="sketchDetailVal"></span></label>
+    <input type="range" id="sketchDetail" min="1" max="14" step="1" value="5">
+    <label>Sketch — contrast <span class="val" id="sketchContrastVal"></span></label>
+    <input type="range" id="sketchContrast" min="0.5" max="3" step="0.05" value="1.4">
+    <div class="canvasWrap" id="sketchPreviewWrap" style="min-height:0; max-height:120px;"><canvas id="sketchPreviewCanvas"></canvas></div>
+    <div class="btnrow"><button id="applySketchBtn">Apply sketch to image</button></div>
 
     <label>Light-intensity weight <span class="val" id="weightVal"></span></label>
     <input type="range" id="weight" min="0" max="1.5" step="0.05" value="0.5">
@@ -110,12 +118,26 @@
     <div class="candidateList" id="candidateList"></div>
   </div>
 
-  <div class="stage">
-    <div class="card">
-      <h3>Detected points</h3>
-      <div class="canvasWrap" id="dropZone">
-        <canvas id="srcCanvas"></canvas>
-        <div class="dropHint" id="dropHint">Drag &amp; drop an image here,<br>or use Upload / Try sample</div>
+  <div class="stage" style="grid-template-columns:1fr;">
+    <div class="pointsRow">
+      <div class="card">
+        <h3>Sketch</h3>
+        <div class="canvasWrap" id="dropZone">
+          <canvas id="srcCanvas"></canvas>
+          <div class="dropHint" id="dropHint">Drag &amp; drop an image here,<br>or use Upload / Try sample</div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Detected points — click to remove, click empty space to add</h3>
+        <div class="canvasWrap" id="autoCanvasWrap"><canvas id="autoCanvas"></canvas></div>
+        <label style="margin-top:10px;">Marker size <span class="val" id="dotSizeVal">1.0×</span></label>
+        <input type="range" id="dotSizeSlider" min="0.4" max="2.5" step="0.05" value="1">
+        <div class="btnrow">
+          <button class="primary" id="findStarsBtn">Find matching stars</button>
+          <button id="autoResetBtn" disabled>Reset to auto-detected</button>
+        </div>
+        <p class="hint" style="margin:6px 0 0;">Editing points is instant; searching the sky for a match takes a few seconds, so it only runs when you ask.</p>
+        <div class="stats" id="autoStatus"></div>
       </div>
     </div>
     <div class="card">
@@ -131,47 +153,10 @@
   </div>
 </div>
 
-<!-- Inline panels (not popups) for the auto-detect and poster tools — both act
-     directly on whatever image is already loaded above ("the active object"),
-     no separate file pickers of their own. Toggled open/closed like
-     #finderSection already was, just shown/hidden in the normal page flow. -->
-<div class="layout" id="autoDetectPanel" style="display:none;">
-  <div class="panel controls">
-    <div style="display:flex; justify-content:space-between; align-items:center;">
-      <h3 style="margin:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted);">Auto-detect landmarks</h3>
-      <button id="autoCloseBtn">Close ✕</button>
-    </div>
-    <p class="hint" style="margin:8px 0 0;">Works on the image already loaded above — no separate upload needed.</p>
-
-    <label style="margin-top:16px;">Sketch — line detail <span class="val" id="sketchDetailVal"></span></label>
-    <input type="range" id="sketchDetail" min="1" max="14" step="1" value="5">
-    <label>Sketch — contrast <span class="val" id="sketchContrastVal"></span></label>
-    <input type="range" id="sketchContrast" min="0.5" max="3" step="0.05" value="1.4">
-    <div class="btnrow"><button id="applySketchBtn">Apply sketch to image</button></div>
-
-    <div class="btnrow"><button class="primary" id="autoRunBtn">Detect points</button></div>
-    <div class="stats" id="autoStatus"></div>
-
-    <label>Marker size <span class="val" id="dotSizeVal">1.0×</span></label>
-    <input type="range" id="dotSizeSlider" min="0.4" max="2.5" step="0.05" value="1">
-    <div class="btnrow">
-      <button class="primary" id="autoUseBtn" disabled>Use this pattern</button>
-      <button id="autoResetBtn" disabled>Reset to auto-detected</button>
-    </div>
-  </div>
-  <div class="stage">
-    <div class="card">
-      <h3>Sketch preview</h3>
-      <div class="canvasWrap" id="sketchPreviewWrap"><canvas id="sketchPreviewCanvas"></canvas></div>
-    </div>
-    <div class="card">
-      <h3>Points — click to remove, click empty space to add</h3>
-      <div class="canvasWrap" id="autoCanvasWrap"><canvas id="autoCanvas"></canvas></div>
-      <p class="hint" id="autoEditHint"></p>
-    </div>
-  </div>
-</div>
-
+<!-- Inline panel (not a popup) for the poster tool — acts directly on
+     whatever image is already loaded above ("the active object"), no
+     separate file picker of its own. Toggled open/closed, shown/hidden in
+     the normal page flow. -->
 <div class="layout" id="posterPanel" style="display:none;">
   <div class="panel controls">
     <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -317,24 +302,14 @@
   })();
 
   // ---------- image loading ----------
-  function loadImageToCanvas(img){
-    let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
-    const scale = Math.min(1, MAX_DIM / Math.max(w,h));
-    w = Math.max(1, Math.round(w*scale));
-    h = Math.max(1, Math.round(h*scale));
-    srcCanvas.width = w; srcCanvas.height = h;
-    const c = srcCanvas.getContext('2d');
-    c.drawImage(img, 0, 0, w, h);
-    sourceLoaded = true;
-    dropHint.style.display = 'none';
-    scheduleProcess();
-  }
-
   // An upload is treated as an already-finished line drawing — nothing is
   // done to it automatically. The app's own job starts and ends at finding
   // landmarks and finding the matching constellation; Invert and Line width
   // below are the only (optional, manual) adjustments offered, and both
   // recompute cleanly from this original each time rather than compounding.
+  // originalPhotoImg can be an <img> (a real upload) or a <canvas> (the
+  // sample pattern, or a sketch-filtered result) — recomputeActiveImage()
+  // only ever needs .width/.height + drawImage, which both provide.
   function loadFile(file){
     if(!file || !file.type.startsWith('image/')) return;
     lastLoadedFileName = stripExtension(file.name);
@@ -346,7 +321,7 @@
       document.getElementById('invertToggle').checked = false;
       document.getElementById('lineWidthSlider').value = 0;
       document.getElementById('lineWidthVal').textContent = '0';
-      loadImageToCanvas(img);
+      recomputeActiveImage(true);
       URL.revokeObjectURL(url);
     };
     img.src = url;
@@ -366,15 +341,16 @@
   });
 
   document.getElementById('sampleBtn').addEventListener('click', () => {
-    originalPhotoImg = null; // synthetic pattern, not a real photo — Auto-detect should fall back to the active object itself
+    lastLoadedFileName = 'Constellation';
     invertOn = false; lineWidthValue = 0;
     document.getElementById('invertToggle').checked = false;
     document.getElementById('lineWidthSlider').value = 0;
     document.getElementById('lineWidthVal').textContent = '0';
     const w = 300, h = 460;
-    srcCanvas.width = w; srcCanvas.height = h;
-    const c = srcCanvas.getContext('2d');
-    c.fillStyle = '#ffffff'; c.fillRect(0,0,w,h);
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,w,h);
     // a simple irregular scatter, sizes vary to encode "brightness"
     const dots = [
       {x:20, y:16, r:7}, {x:263, y:10, r:6.5},
@@ -383,12 +359,11 @@
       {x:154, y:440, r:8},
     ];
     for(const d of dots){
-      c.beginPath(); c.arc(d.x, d.y, d.r, 0, Math.PI*2);
-      c.fillStyle = '#eec230'; c.fill();
+      ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI*2);
+      ctx.fillStyle = '#eec230'; ctx.fill();
     }
-    sourceLoaded = true;
-    dropHint.style.display = 'none';
-    scheduleProcess();
+    originalPhotoImg = c; // the pattern IS the "original" — already has its own dots baked in
+    recomputeActiveImage(true);
   });
 
   // ---------- dot detection ----------
@@ -784,64 +759,34 @@
     return Math.hypot(gx[i], gy[i]);
   }
 
-  // ---------- auto-detect panel state/wiring ----------
-  // Operates on the image already loaded above (srcCanvas, "the active
-  // object") — no separate file picker of its own. originalPhotoImg (set at
-  // upload time) is used for the actual landmark/corner detection, since that
-  // wants real photo pixel data; the dots always get composited onto a
-  // snapshot of whatever the active object currently looks like (which may
-  // already be sketch-ified or inverted by this point).
-  const autoPanel = document.getElementById('autoDetectPanel');
+  // ---------- landmark detection state/wiring ----------
+  // Detected points now live permanently on the home screen, next to the
+  // sketch, and stay in sync live — no separate panel, no manual "detect" or
+  // "use this pattern" step. cleanBackdropCanvas holds the current active
+  // image WITHOUT any dots baked in (the output of invert/line width/sketch);
+  // srcCanvas is always cleanBackdropCanvas + the current dots composited on
+  // top, which is what feeds the existing orange-dot-based matching pipeline
+  // in process() unchanged.
   const autoCanvas = document.getElementById('autoCanvas');
   const autoStatus = document.getElementById('autoStatus');
-  const autoEditHint = document.getElementById('autoEditHint');
-  let autoBackdropImg = null;   // canvas snapshot of the active object, taken when "Detect points" ran
-  let autoPhotoCanvas = null;   // offscreen canvas of the detection source, for landmark/corner detection + gradient sampling
-  let autoDots = [];            // [{x,y,r}] in autoBackdropImg pixel space — r is the BASE size, before dotSizeMultiplier
-  let autoDetectedDots = [];    // snapshot of the raw auto-detected result, for "Reset"
+  const cleanBackdropCanvas = document.createElement('canvas');
+  let autoDots = [];            // [{x,y,r}] in cleanBackdropCanvas pixel space — r is the BASE size, before dotSizeMultiplier
+  let autoDetectedDots = [];    // snapshot of the raw detected result, for "Reset"
   let dotSizeMultiplier = 1;    // live "Marker size" slider — applied at draw/composite time, not baked into stored r
-
-  // Always sample from the CURRENT active object (srcCanvas), which already
-  // reflects every edit made so far (line width, invert, applied sketch) —
-  // never fall back to the pristine originalPhotoImg here, or landmark
-  // detection, the sketch preview, and everything downstream of them
-  // (including the poster) end up built from the un-edited upload instead of
-  // what's actually on screen.
-  function detectionSourceImg(){
-    return sourceLoaded ? srcCanvas : null;
-  }
-
-  let autoPanelOpen = false;
-  document.getElementById('autoDetectBtn').addEventListener('click', () => {
-    if(!sourceLoaded) return;
-    autoPanelOpen = !autoPanelOpen;
-    autoPanel.style.display = autoPanelOpen ? '' : 'none';
-    if(autoPanelOpen){
-      updateSketchPreview();
-      // The panel appears in normal page flow below the main grid, off-screen
-      // on shorter viewports — without this it can look like the button did
-      // nothing at all.
-      autoPanel.scrollIntoView({behavior:'auto', block:'start'});
-    }
-  });
-  document.getElementById('autoCloseBtn').addEventListener('click', () => {
-    autoPanelOpen = false;
-    autoPanel.style.display = 'none';
-  });
 
   document.getElementById('dotSizeSlider').addEventListener('input', e => {
     dotSizeMultiplier = parseFloat(e.target.value);
     document.getElementById('dotSizeVal').textContent = dotSizeMultiplier.toFixed(2)+'×';
-    renderAutoCanvas();
+    compositeDots();
   });
 
-  function renderAutoCanvas(){
-    if(!autoBackdropImg) return;
-    const w = autoBackdropImg.width, h = autoBackdropImg.height;
+  function renderPointsCanvas(){
+    const w = cleanBackdropCanvas.width, h = cleanBackdropCanvas.height;
+    if(!w || !h) return;
     const dispScale = Math.min(1, 480/Math.max(w,h));
     autoCanvas.width = Math.round(w*dispScale); autoCanvas.height = Math.round(h*dispScale);
     const ctx = autoCanvas.getContext('2d');
-    ctx.drawImage(autoBackdropImg, 0, 0, autoCanvas.width, autoCanvas.height);
+    ctx.drawImage(cleanBackdropCanvas, 0, 0, autoCanvas.width, autoCanvas.height);
     autoCanvas._scale = dispScale;
     const mst = buildMST(autoDots);
     ctx.strokeStyle = 'rgba(110,168,254,0.9)'; ctx.lineWidth = 1.5;
@@ -859,8 +804,37 @@
     }
   }
 
+  // Draws cleanBackdropCanvas + the current dots onto srcCanvas (what the
+  // matching pipeline reads) and refreshes the Points preview. Fast and
+  // synchronous — safe to call on every click while placing/editing dots.
+  function compositeDots(){
+    const w = cleanBackdropCanvas.width, h = cleanBackdropCanvas.height;
+    if(!w || !h) return;
+    srcCanvas.width = w; srcCanvas.height = h;
+    const ctx = srcCanvas.getContext('2d');
+    ctx.drawImage(cleanBackdropCanvas, 0, 0, w, h);
+    ctx.fillStyle = '#e6941e';
+    for(const d of autoDots){
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r*dotSizeMultiplier, 0, Math.PI*2);
+      ctx.fill();
+    }
+    sourceLoaded = true;
+    dropHint.style.display = 'none';
+    renderPointsCanvas();
+  }
+
+  // Same, but also kicks off the sky-matching search — that search takes
+  // several seconds AND blocks the page while it runs, so this is only used
+  // after a genuinely new/adjusted image (upload, sample pattern, sketch,
+  // invert, line width), never on individual dot edits (see compositeDots).
+  function compositeDotsAndProcess(){
+    compositeDots();
+    scheduleProcess();
+  }
+
   autoCanvas.addEventListener('click', e => {
-    if(!autoBackdropImg) return;
+    if(!cleanBackdropCanvas.width) return;
     const rect = autoCanvas.getBoundingClientRect();
     const scale = autoCanvas._scale || 1;
     const x = (e.clientX-rect.left) * (autoCanvas.width/rect.width) / scale;
@@ -869,16 +843,25 @@
     if(hitIdx>=0){
       autoDots.splice(hitIdx,1);
     } else if(autoDots.length < 8){ // never more than 8 landmarks
-      const gradInfo = autoPhotoCanvas ? grayscaleAndGradients(autoPhotoCanvas.getContext('2d').getImageData(0,0,autoPhotoCanvas.width,autoPhotoCanvas.height)) : null;
-      const r = gradInfo ? Math.max(5, Math.min(11, 5+gradientMagnitudeAt(gradInfo, x*(autoPhotoCanvas.width/autoCanvas.width*(autoCanvas._scale||1)), y*(autoPhotoCanvas.height/autoCanvas.height*(autoCanvas._scale||1)))/40)) : 8;
+      const gradInfo = grayscaleAndGradients(cleanBackdropCanvas.getContext('2d').getImageData(0,0,cleanBackdropCanvas.width,cleanBackdropCanvas.height));
+      const r = Math.max(5, Math.min(11, 5+gradientMagnitudeAt(gradInfo, x, y)/40));
       autoDots.push({ x, y, r });
     }
-    renderAutoCanvas();
+    compositeDots();
   });
 
   document.getElementById('autoResetBtn').addEventListener('click', () => {
     autoDots = autoDetectedDots.map(d => ({...d}));
-    renderAutoCanvas();
+    compositeDots();
+  });
+
+  // The sky-matching search is genuinely slow (a real star-catalog search,
+  // several seconds and it blocks the page while running) — point editing
+  // above stays instant, but re-running the search itself is a deliberate,
+  // explicit step rather than something that fires on every click.
+  document.getElementById('findStarsBtn').addEventListener('click', () => {
+    if(processTimer) clearTimeout(processTimer);
+    process();
   });
 
   // Builds the pencil-sketch version of an image at a given max dimension,
@@ -903,9 +886,8 @@
 
   let sketchPreviewTimer = null;
   function updateSketchPreview(){
-    const src = detectionSourceImg();
-    if(!src) return;
-    const canvas = buildSketchCanvasFromImage(src, 480);
+    if(!cleanBackdropCanvas.width) return;
+    const canvas = buildSketchCanvasFromImage(cleanBackdropCanvas, 480);
     const previewCanvas = document.getElementById('sketchPreviewCanvas');
     previewCanvas.width = canvas.width; previewCanvas.height = canvas.height;
     previewCanvas.getContext('2d').drawImage(canvas, 0, 0);
@@ -926,102 +908,88 @@
   document.getElementById('sketchContrastVal').textContent = parseFloat(document.getElementById('sketchContrast').value).toFixed(2);
 
   document.getElementById('applySketchBtn').addEventListener('click', () => {
-    const src = detectionSourceImg();
-    if(!src) return;
-    const iw = src.naturalWidth||src.width, ih = src.naturalHeight||src.height;
-    const canvas = buildSketchCanvasFromImage(src, Math.min(1400, Math.max(iw,ih)));
-    loadImageToCanvas(canvas); // becomes the new active object; scheduleProcess() runs automatically
+    if(!cleanBackdropCanvas.width) return;
+    const canvas = buildSketchCanvasFromImage(cleanBackdropCanvas, Math.min(1400, Math.max(cleanBackdropCanvas.width, cleanBackdropCanvas.height)));
+    // The sketch becomes the new baseline: reset invert/line width (they'd
+    // otherwise double-apply on top of a source that already reflects them).
+    originalPhotoImg = canvas;
+    invertOn = false; lineWidthValue = 0;
+    document.getElementById('invertToggle').checked = false;
+    document.getElementById('lineWidthSlider').value = 0;
+    document.getElementById('lineWidthVal').textContent = '0';
+    recomputeActiveImage(true);
     autoStatus.textContent = 'Sketch applied to the active image.';
   });
 
-  async function runAutoDetect(){
-    const detectSrc = detectionSourceImg();
-    if(!detectSrc){ autoStatus.textContent = 'Upload an image first.'; return; }
-    autoStatus.textContent = 'Analyzing…';
-    document.getElementById('autoUseBtn').disabled = true;
+  // Runs whenever the active image is genuinely new (upload, sample pattern,
+  // applied sketch) — NOT on every invert/line-width tweak, so manual point
+  // edits survive those. Prefers points already marked in the image itself
+  // (e.g. the sample pattern, or a re-opened export); only falls back to
+  // guessing landmarks (face detection, else generic corner detection) when
+  // there's nothing already marked.
+  async function runDetection(){
+    const w = cleanBackdropCanvas.width, h = cleanBackdropCanvas.height;
+    if(!w || !h) return;
+    autoStatus.textContent = 'Looking for points…';
     document.getElementById('autoResetBtn').disabled = true;
 
-    autoBackdropImg = snapshotCanvas(srcCanvas);
+    const imgData = cleanBackdropCanvas.getContext('2d').getImageData(0,0,w,h);
+    const alreadyMarked = detectDots(imgData);
+    if(alreadyMarked.length >= 3){
+      autoStatus.textContent = `Found ${alreadyMarked.length} already-marked point(s).`;
+      autoDots = alreadyMarked.map(b => ({ x:b.x, y:b.y, r: Math.max(4, Math.min(14, Math.sqrt(b.area/Math.PI))) }));
+      autoDetectedDots = autoDots.map(d => ({...d}));
+      document.getElementById('autoResetBtn').disabled = false;
+      return;
+    }
 
-    const dw0 = detectSrc.naturalWidth||detectSrc.width, dh0 = detectSrc.naturalHeight||detectSrc.height;
-    const scale = Math.min(1, MAX_DIM/Math.max(dw0,dh0));
-    const dw = Math.max(1,Math.round(dw0*scale)), dh = Math.max(1,Math.round(dh0*scale));
-    autoPhotoCanvas = document.createElement('canvas');
-    autoPhotoCanvas.width = dw; autoPhotoCanvas.height = dh;
-    autoPhotoCanvas.getContext('2d').drawImage(detectSrc, 0, 0, dw, dh);
-
-    const bw = autoBackdropImg.width, bh = autoBackdropImg.height;
-    const scaleToBackdropX = bw/dw, scaleToBackdropY = bh/dh;
-    const gradInfo = grayscaleAndGradients(autoPhotoCanvas.getContext('2d').getImageData(0,0,dw,dh));
-
-    function toBackdropDot(x, y){
+    const gradInfo = grayscaleAndGradients(imgData);
+    function toDot(x, y){
       const g = gradientMagnitudeAt(gradInfo, x, y);
       const r = Math.max(5, Math.min(11, 5 + g/40));
-      return { x: x*scaleToBackdropX, y: y*scaleToBackdropY, r };
+      return { x, y, r };
     }
 
     autoStatus.textContent = 'Looking for a face…';
     let points = null;
-    // Face detection only makes sense against a real, unedited photo.
-    if(window.detectFaceLandmarks && originalPhotoImg){
-      try{ points = await window.detectFaceLandmarks(autoPhotoCanvas); }catch(err){ points = null; }
+    // Face detection only makes sense against a real, photo-like image.
+    if(window.detectFaceLandmarks){
+      try{ points = await window.detectFaceLandmarks(cleanBackdropCanvas); }catch(err){ points = null; }
     }
 
     if(points && points.length){
       autoStatus.textContent = `Face detected — placed ${FACE_LANDMARK_INDICES.length} landmark points.`;
-      autoDots = FACE_LANDMARK_INDICES.map(idx => toBackdropDot(points[idx].x, points[idx].y));
+      autoDots = FACE_LANDMARK_INDICES.map(idx => toDot(points[idx].x, points[idx].y));
     } else {
       autoStatus.textContent = 'No face detected — using generic salient-point detection (works for animals, objects, buildings, etc).';
       // Never more than 8 landmarks, never fewer than 6.
-      const corners = shiTomasiCorners({ width: dw, height: dh, data: autoPhotoCanvas.getContext('2d').getImageData(0,0,dw,dh).data }, 8);
+      const corners = shiTomasiCorners({ width: w, height: h, data: imgData.data }, 8);
       if(corners.length < 6){
         autoStatus.textContent = `Only found ${corners.length} distinct point(s) (need at least 6) — try a higher-contrast image, or place dots manually.`;
         autoDots = [];
       } else {
-        autoDots = corners.map(c => toBackdropDot(c.x, c.y));
+        autoDots = corners.map(c => toDot(c.x, c.y));
       }
     }
     autoDetectedDots = autoDots.map(d => ({...d}));
-    autoEditHint.textContent = 'Click a dot to remove it, or click empty space to add one, before using this pattern.';
-    document.getElementById('autoUseBtn').disabled = autoDots.length < 3;
     document.getElementById('autoResetBtn').disabled = false;
-    renderAutoCanvas();
   }
-  document.getElementById('autoRunBtn').addEventListener('click', () => { runAutoDetect(); });
-
-  document.getElementById('autoUseBtn').addEventListener('click', () => {
-    if(!autoBackdropImg || autoDots.length<3) return;
-    const w = autoBackdropImg.width, h = autoBackdropImg.height;
-    const c = document.createElement('canvas');
-    c.width = w; c.height = h;
-    const ctx = c.getContext('2d');
-    ctx.drawImage(autoBackdropImg, 0, 0, w, h);
-    ctx.fillStyle = '#e6941e';
-    for(const d of autoDots){
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, d.r*dotSizeMultiplier, 0, Math.PI*2);
-      ctx.fill();
-    }
-    const composite = new Image();
-    composite.onload = () => { loadImageToCanvas(composite); autoPanel.style.display = 'none'; };
-    composite.src = c.toDataURL('image/png');
-  });
 
   // ---------- invert + line width: both recompute from the ORIGINAL upload
   // each time, in the same fixed order (line width, then invert), so dragging
   // the slider back and forth or toggling invert never compounds/degrades the
   // image and never depends on which one you touched first. ----------
-  function recomputeActiveImage(){
+  async function recomputeActiveImage(isNewImage){
     if(!originalPhotoImg) return;
-    // Draw straight onto srcCanvas in a single hop — identical to what a plain
-    // upload does — instead of compositing through an intermediate canvas and
-    // handing that off to loadImageToCanvas(), which used to draw the image a
-    // second time and left visible resampling artifacts even at "no change".
+    // Draw straight into cleanBackdropCanvas in a single hop — identical to
+    // what a plain upload does — instead of compositing through an
+    // intermediate canvas, which used to draw the image a second time and
+    // left visible resampling artifacts even at "no change".
     const iw = originalPhotoImg.naturalWidth||originalPhotoImg.width, ih = originalPhotoImg.naturalHeight||originalPhotoImg.height;
     const scale = Math.min(1, MAX_DIM/Math.max(iw,ih));
     const w = Math.max(1,Math.round(iw*scale)), h = Math.max(1,Math.round(ih*scale));
-    srcCanvas.width = w; srcCanvas.height = h;
-    const ctx = srcCanvas.getContext('2d');
+    cleanBackdropCanvas.width = w; cleanBackdropCanvas.height = h;
+    const ctx = cleanBackdropCanvas.getContext('2d');
     ctx.drawImage(originalPhotoImg, 0, 0, w, h);
     if(lineWidthValue !== 0 || invertOn){
       let imgData = ctx.getImageData(0, 0, w, h);
@@ -1029,14 +997,17 @@
       if(invertOn) imgData = invertImageData(imgData);
       ctx.putImageData(imgData, 0, 0);
     }
-    sourceLoaded = true;
-    dropHint.style.display = 'none';
-    scheduleProcess();
+    if(isNewImage){
+      autoDots = [];
+      await runDetection();
+    }
+    compositeDotsAndProcess();
+    updateSketchPreview();
   }
 
   document.getElementById('invertToggle').addEventListener('change', e => {
     invertOn = e.target.checked;
-    recomputeActiveImage();
+    recomputeActiveImage(false);
   });
 
   let lineWidthTimer = null;
@@ -1044,7 +1015,7 @@
     lineWidthValue = parseInt(e.target.value, 10);
     document.getElementById('lineWidthVal').textContent = (lineWidthValue>0?'+':'')+lineWidthValue;
     if(lineWidthTimer) clearTimeout(lineWidthTimer);
-    lineWidthTimer = setTimeout(recomputeActiveImage, 120);
+    lineWidthTimer = setTimeout(() => recomputeActiveImage(false), 120);
   });
 
   // Solves the 2D affine (a,b,c,d,e,f) that maps 3 source points onto 3
@@ -2221,30 +2192,20 @@
     return copy;
   }
 
-  function drawDetectedOverlay(dots, mstEdges){
-    const ctx = srcCanvas.getContext('2d');
-    ctx.strokeStyle = 'rgba(110,168,254,0.9)';
-    ctx.lineWidth = 1.5;
-    for(const [a,b] of mstEdges){
-      ctx.beginPath();
-      ctx.moveTo(dots[a].x, dots[a].y);
-      ctx.lineTo(dots[b].x, dots[b].y);
-      ctx.stroke();
-    }
-    ctx.fillStyle = 'rgba(110,168,254,0.95)';
-    for(const d of dots){
-      ctx.beginPath();
-      ctx.arc(d.x, d.y, 4, 0, Math.PI*2);
-      ctx.fill();
-    }
-  }
-
   let processTimer = null;
   let processGeneration = 0;
   function scheduleProcess(){
     if(!sourceLoaded) return;
     if(processTimer) clearTimeout(processTimer);
-    processTimer = setTimeout(process, 30);
+    // The actual sky-matching search this kicks off takes seconds, not
+    // milliseconds (it's searching a real star catalog) — now that point
+    // edits (add/remove/marker size) trigger this live instead of only once
+    // on an explicit "commit" step, a short debounce would fire that search
+    // after every single click while someone is still placing dots. A longer
+    // pause here only delays the (already slow) search until edits settle;
+    // it doesn't slow down the point-editing itself, which redraws
+    // synchronously elsewhere.
+    processTimer = setTimeout(process, 500);
   }
 
   async function process(){
@@ -2284,11 +2245,10 @@
       return;
     }
 
+    // The Points card already shows the detected dots + connecting lines live
+    // (renderPointsCanvas) — Sketch stays the plain active image, no overlay
+    // baked into srcCanvas on top of it.
     const mstEdges = buildMST(dots);
-    const c = srcCanvas.getContext('2d');
-    c.clearRect(0,0,srcCanvas.width,srcCanvas.height);
-    c.drawImage(snapshot,0,0);
-    drawDetectedOverlay(dots, mstEdges);
 
     pathStats.textContent = `Detected ${dots.length} points — searching the sky for the best-fitting stars…`;
     candidateListEl.innerHTML = '';
