@@ -41,8 +41,6 @@
 
   .stage{ display:grid; grid-template-columns:280px 1fr; gap:14px; align-items:start; }
   @media (max-width: 950px){ .stage{grid-template-columns:1fr;} }
-  .pointsRow{ display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; }
-  @media (max-width: 950px){ .pointsRow{grid-template-columns:1fr;} }
   .card{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:12px; text-align:center; }
   .card h3{margin:0 0 8px; font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.04em;}
   .canvasWrap{
@@ -80,7 +78,7 @@
       <span style="font-size:12px; color:var(--text);">Invert colors</span>
     </label>
     <label>Line width <span class="val" id="lineWidthVal">0</span></label>
-    <input type="range" id="lineWidthSlider" min="-10" max="10" step="1" value="0">
+    <input type="range" id="lineWidthSlider" min="0" max="3" step="0.01" value="0">
 
     <label>Light-intensity weight <span class="val" id="weightVal"></span></label>
     <input type="range" id="weight" min="0" max="1.5" step="0.05" value="0.5">
@@ -110,29 +108,24 @@
   </div>
 
   <div class="stage" style="grid-template-columns:1fr;">
-    <div class="pointsRow">
-      <div class="card">
-        <h3>Sketch</h3>
-        <div class="canvasWrap" id="dropZone">
-          <canvas id="srcCanvas"></canvas>
-          <div class="dropHint" id="dropHint">Drag &amp; drop an image here,<br>or use Upload / Try sample</div>
-        </div>
+    <div class="card">
+      <h3>Detected points — click to remove, click empty space to add</h3>
+      <div class="canvasWrap" id="dropZone">
+        <canvas id="autoCanvas"></canvas>
+        <div class="dropHint" id="dropHint">Drag &amp; drop an image here,<br>or use Upload / Try sample</div>
       </div>
-      <div class="card">
-        <h3>Detected points — click to remove, click empty space to add</h3>
-        <div class="canvasWrap" id="autoCanvasWrap"><canvas id="autoCanvas"></canvas></div>
-        <label style="margin-top:10px;">Marker size <span class="val" id="dotSizeVal">1.0×</span></label>
-        <input type="range" id="dotSizeSlider" min="0.4" max="2.5" step="0.05" value="1">
-        <div class="btnrow"><button id="autoResetBtn" disabled>Reset to auto-detected</button></div>
-        <div class="stats" id="autoStatus"></div>
-      </div>
+      <canvas id="srcCanvas" style="display:none;"></canvas>
+      <label style="margin-top:10px;">Marker size <span class="val" id="dotSizeVal">1.0×</span></label>
+      <input type="range" id="dotSizeSlider" min="0.4" max="2.5" step="0.05" value="1">
+      <div class="btnrow"><button id="autoResetBtn" disabled>Reset to auto-detected</button></div>
+      <div class="stats" id="autoStatus"></div>
     </div>
     <div class="card">
       <h3>Matching sky region</h3>
       <div class="row" style="margin-bottom:8px; align-items:center; gap:8px;">
         <span style="font-size:11px; color:var(--muted);">Zoom out</span>
-        <input type="range" id="skyZoom" min="0.3" max="4" step="0.1" value="1" style="flex:1; accent-color:var(--accent);">
-        <span style="font-size:11px; color:var(--muted);">Zoom in</span>
+        <input type="range" id="skyZoom" min="0.1" max="1" step="0.01" value="1" style="flex:1; accent-color:var(--accent);">
+        <span style="font-size:11px; color:var(--muted);">Normal</span>
         <span class="val" id="skyZoomVal" style="min-width:32px;">1.0×</span>
       </div>
       <div class="canvasWrap" id="chartHolder"></div>
@@ -249,7 +242,7 @@
   let lastLoadedFileName = '';
   let originalPhotoImg = null; // the finished line drawing as uploaded, kept aside so Invert/Line width always recompute from a clean copy instead of compounding
   let invertOn = false;
-  let lineWidthValue = 0; // -10..10, 0 = unchanged; negative = thinner (erode), positive = thicker (dilate)
+  let lineWidthValue = 0; // 0..3 pixels of dilation, 0 = unchanged
   const FINDER_SIZE = 720;
 
   function stripExtension(name){
@@ -516,51 +509,64 @@
     return out;
   }
 
-  // ---------- line width: morphological dilate (thicker) / erode (thinner) ----------
-  // Works on luminance (this app's line drawings are effectively monochrome —
-  // light lines on a dark field, or vice versa), via a separable min/max
-  // filter: a full 2D square-kernel min/max equals a horizontal pass followed
-  // by a vertical pass, which is what makes an O(radius) per pixel filter
-  // possible instead of O(radius²).
+  // ---------- line width: thickens lines by dilating them outward ----------
+  // Uses a chamfer distance transform (a fast, close approximation of true
+  // Euclidean distance) from every pixel to the nearest foreground pixel,
+  // computed once in two passes, then thresholds that distance against
+  // `amount`. Thresholding a continuous distance is what lets amount be any
+  // fractional pixel count (not just whole numbers) while the output stays
+  // pure black/white — the threshold itself is still a hard yes/no test, so
+  // there's never a gray gradient at the new edge.
   function applyLineWidthImageData(imgData, amount){
     if(!amount) return imgData;
     const w = imgData.width, h = imgData.height, data = imgData.data;
     const n = w*h;
-    // Binarize to pure black/white BEFORE dilating/eroding. Taking the
-    // min/max of raw (anti-aliased) luminance would drag partial gray edge
-    // values along with it, so a thickened/thinned line would show a faint
-    // gradient at its new edge instead of staying a solid line like the
-    // uploaded artwork.
-    const lum = new Float32Array(n);
+    // Binarize to pure black/white first — taking the distance transform of
+    // raw (anti-aliased) luminance would let partial gray edge pixels count
+    // as "foreground", fuzzing the result.
+    const fg = new Uint8Array(n);
     for(let i=0,p=0;i<data.length;i+=4,p++){
       const v = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
-      lum[p] = v > 127.5 ? 255 : 0;
+      fg[p] = v > 127.5 ? 1 : 0;
     }
-    const radius = Math.abs(amount), dilate = amount > 0;
-    const tmp = new Float32Array(n);
+    const INF = 1e9;
+    const dist = new Float32Array(n);
+    for(let p=0;p<n;p++) dist[p] = fg[p] ? 0 : INF;
+    const D1 = 1, D2 = Math.SQRT2;
     for(let y=0;y<h;y++){
       const row = y*w;
       for(let x=0;x<w;x++){
-        let best = lum[row+x];
-        for(let d=1;d<=radius;d++){
-          if(x-d>=0){ const v=lum[row+x-d]; if(dilate?v>best:v<best) best=v; }
-          if(x+d<w){ const v=lum[row+x+d]; if(dilate?v>best:v<best) best=v; }
+        const i = row+x;
+        let best = dist[i];
+        if(x>0) best = Math.min(best, dist[i-1]+D1);
+        if(y>0){
+          best = Math.min(best, dist[i-w]+D1);
+          if(x>0) best = Math.min(best, dist[i-w-1]+D2);
+          if(x<w-1) best = Math.min(best, dist[i-w+1]+D2);
         }
-        tmp[row+x] = best;
+        dist[i] = best;
+      }
+    }
+    for(let y=h-1;y>=0;y--){
+      const row = y*w;
+      for(let x=w-1;x>=0;x--){
+        const i = row+x;
+        let best = dist[i];
+        if(x<w-1) best = Math.min(best, dist[i+1]+D1);
+        if(y<h-1){
+          best = Math.min(best, dist[i+w]+D1);
+          if(x<w-1) best = Math.min(best, dist[i+w+1]+D2);
+          if(x>0) best = Math.min(best, dist[i+w-1]+D2);
+        }
+        dist[i] = best;
       }
     }
     const out = new ImageData(w, h);
-    for(let x=0;x<w;x++){
-      for(let y=0;y<h;y++){
-        let best = tmp[y*w+x];
-        for(let d=1;d<=radius;d++){
-          if(y-d>=0){ const v=tmp[(y-d)*w+x]; if(dilate?v>best:v<best) best=v; }
-          if(y+d<h){ const v=tmp[(y+d)*w+x]; if(dilate?v>best:v<best) best=v; }
-        }
-        const idx=(y*w+x)*4;
-        out.data[idx]=out.data[idx+1]=out.data[idx+2]=best;
-        out.data[idx+3]=255;
-      }
+    for(let p=0;p<n;p++){
+      const val = dist[p] <= amount ? 255 : 0;
+      const idx = p*4;
+      out.data[idx]=out.data[idx+1]=out.data[idx+2]=val;
+      out.data[idx+3]=255;
     }
     return out;
   }
@@ -835,8 +841,8 @@
 
   let lineWidthTimer = null;
   document.getElementById('lineWidthSlider').addEventListener('input', e => {
-    lineWidthValue = parseInt(e.target.value, 10);
-    document.getElementById('lineWidthVal').textContent = (lineWidthValue>0?'+':'')+lineWidthValue;
+    lineWidthValue = parseFloat(e.target.value);
+    document.getElementById('lineWidthVal').textContent = lineWidthValue.toFixed(2);
     if(lineWidthTimer) clearTimeout(lineWidthTimer);
     lineWidthTimer = setTimeout(() => recomputeActiveImage(false), 120);
   });
