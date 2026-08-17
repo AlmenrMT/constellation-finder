@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <title>Constellation Finder — AR Viewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<script src="starinfo.js"></script>
 <style>
   :root{
     --bg:#0b0d12; --panel:#1a1d24; --border:#333844; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe; --good:#5ee08a; --warn:#ffb04a;
@@ -44,8 +45,10 @@
 
   /* ---- summary screen ---- */
   #summaryScreen{ display:none; }
-  #summaryScreen .starList{ text-align:left; font-size:13px; color:var(--muted); max-height:160px; overflow-y:auto; margin-top:6px; }
-  #summaryScreen .starList div{ padding:3px 0; border-bottom:1px solid var(--border); }
+  #summaryScreen .starList{ text-align:left; font-size:13px; color:var(--muted); max-height:46vh; overflow-y:auto; margin-top:6px; }
+  #summaryScreen .starEntry{ padding:8px 0; border-bottom:1px solid var(--border); line-height:1.5; }
+  #summaryScreen .starEntry b{ color:var(--text); font-size:14px; }
+  #summaryScreen .starEntry .starMeta{ font-size:12px; }
 
   /* ---- AR screen ---- */
   #arScreen{ position:fixed; inset:0; display:none; background:#000; }
@@ -325,7 +328,7 @@
     document.getElementById('loadStatus').textContent = '';
     document.getElementById('summaryTitle').textContent = summarizeStars(map.stars);
     document.getElementById('summarySub').textContent = `${map.stars.length} stars · ${sourceLabel}`;
-    document.getElementById('summaryStars').innerHTML = map.stars.map(s => `<div>${s.name} — ${s.constellation} (mag ${s.mag})</div>`).join('');
+    document.getElementById('summaryStars').innerHTML = map.stars.map(describeStarHtml).join('');
     if(map.observerDefault){
       lat = map.observerDefault.lat; lon = map.observerDefault.lon;
       document.getElementById('manLat').value = lat;
@@ -346,6 +349,37 @@
   function summarizeStars(stars){
     const cons = [...new Set(stars.map(s=>s.constellation))];
     return cons.join(', ');
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // Apparent magnitude is the only brightness figure every star in the
+  // catalog has, so it's the one description field that always works,
+  // regardless of whether STAR_INFO has an entry for this star.
+  function describeBrightness(mag){
+    if(mag < 0) return 'one of the brightest stars in the night sky';
+    if(mag < 1) return 'very bright';
+    if(mag < 2) return 'bright';
+    if(mag < 3.5) return 'moderately bright';
+    if(mag < 5) return 'faint, visible to the naked eye in dark skies';
+    return 'very faint, near the naked-eye limit';
+  }
+
+  // Real distance/spectral-type/notable-feature facts only exist for the
+  // well-documented named stars (see starinfo.js) — everything else still
+  // gets name, constellation, and a plain-language brightness description
+  // from its magnitude (which every star in the catalog has), rather than a
+  // guessed number.
+  function describeStarHtml(s){
+    const info = (window.STAR_INFO && window.STAR_INFO[s.name]) || null;
+    const lines = [`Officially part of the constellation <b>${escapeHtml(s.constellation)}</b>.`];
+    lines.push(`Apparent magnitude ${s.mag} — ${describeBrightness(s.mag)}.`);
+    if(info && info.distanceLy) lines.push(`About ${info.distanceLy.toLocaleString('en-US')} light-years from Earth.`);
+    if(info && info.type) lines.push(`Type: ${escapeHtml(info.type)}.`);
+    if(info && info.note) lines.push(escapeHtml(info.note));
+    return `<div class="starEntry"><b>${escapeHtml(s.name)}</b><div class="starMeta">${lines.join(' ')}</div></div>`;
   }
 
   // Precomputes each drawing-grid point's fixed (ra,dec) once at load time —
