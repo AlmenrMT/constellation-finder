@@ -589,6 +589,53 @@
     });
   }
 
+  // Low-precision solar position (good to ~0.01°, from the Astronomical
+  // Almanac's low-precision formulas) — plenty accurate for "is it dark
+  // enough for stars", which only needs the sun's altitude to the nearest
+  // degree or so.
+  function sunRaDec(jd){
+    const n = jd - 2451545.0;
+    const L = ((280.460 + 0.9856474*n)%360+360)%360;
+    const g = degToRad(((357.528 + 0.9856003*n)%360+360)%360);
+    const lambda = degToRad(L) + degToRad(1.915)*Math.sin(g) + degToRad(0.020)*Math.sin(2*g);
+    const epsilon = degToRad(23.439 - 0.0000004*n);
+    const ra = Math.atan2(Math.cos(epsilon)*Math.sin(lambda), Math.cos(lambda));
+    const dec = Math.asin(Math.sin(epsilon)*Math.sin(lambda));
+    return { ra: ((radToDeg(ra)%360)+360)%360, dec: radToDeg(dec) };
+  }
+  // Civil twilight (sun 6° below the horizon) — the sun itself being up (or
+  // barely set) washes out anything but the very brightest stars, so "the
+  // target constellation is above the horizon" alone isn't enough to call it
+  // stargazing weather.
+  const NIGHT_SUN_ALT_MAX = -6;
+  function isNightEnough(){
+    const jd = manualMode ? currentManualJulianDate() : nowJulianDate();
+    const sun = sunRaDec(jd);
+    return raDecToAltAz(sun.ra, sun.dec, lat, lon, jd).alt <= NIGHT_SUN_ALT_MAX;
+  }
+
+  // A lit room reads as bright in the live camera feed the same way a real
+  // night sky never does — sampled from the actual passthrough video, since
+  // there's no ambient-light-sensor API available in the browser. Approximate
+  // by design: exact brightness depends on the phone's camera/exposure, so
+  // this is tuned to clearly separate "obviously lit indoors" rather than to
+  // be precise.
+  const BRIGHT_LUMINANCE_THRESHOLD = 60; // 0-255
+  const BRIGHT_COOLDOWN_MS = 8000; // avoid rapid on/off flicker once flagged
+  const brightnessCanvas = document.createElement('canvas');
+  let brightCooldownUntil = 0;
+  function sampleCameraTooBright(){
+    if(!cameraActive || !camVideo.videoWidth) return false;
+    const SIZE = 24;
+    brightnessCanvas.width = SIZE; brightnessCanvas.height = SIZE;
+    const bctx = brightnessCanvas.getContext('2d');
+    bctx.drawImage(camVideo, 0, 0, SIZE, SIZE);
+    const data = bctx.getImageData(0, 0, SIZE, SIZE).data;
+    let sum = 0;
+    for(let i=0;i<data.length;i+=4) sum += 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+    return (sum/(data.length/4)) > BRIGHT_LUMINANCE_THRESHOLD;
+  }
+
   // The camera is only ever turned on when it's actually useful: on a phone,
   // showing the REAL current sky (not a manually-set time/place), with the
   // constellation above the horizon and at least one of its stars in view.
@@ -634,17 +681,32 @@
 
   function evaluateCameraGate(){
     if(cameraTransition) return;
+    // If a previous check just found the live scene too bright, don't
+    // immediately try to turn the camera back on to check again — that
+    // would flicker on/off every 500ms. Wait out the cooldown first.
+    if(performance.now() < brightCooldownUntil){
+      if(cameraActive){ cameraTransition = true; setCameraActive(false, 'Camera paused — the scene looked too bright for stargazing (dim the lights or head somewhere darker).').finally(() => { cameraTransition = false; }); }
+      return;
+    }
     let desired = false, reason = '';
     if(!IS_MOBILE){ reason = 'Camera view is only used on mobile phones.'; }
     else if(manualMode){ reason = "Camera paused — you're viewing a manually-set time/place, not your real location."; }
     else if(!targetAltAz || targetAltAz.alt <= 0){ reason = "Camera paused — this constellation is below the horizon right now."; }
+    else if(!isNightEnough()){ reason = "Camera paused — it's not dark enough yet to see stars."; }
     else if(!anyStarOnScreen()){ reason = 'Camera paused — turn toward the constellation to activate it.'; }
     else { desired = true; }
     if(desired !== cameraActive){
       cameraTransition = true;
-      setCameraActive(desired, reason).finally(() => { cameraTransition = false; });
+      setCameraActive(desired, reason).finally(() => {
+        cameraTransition = false;
+        // Give the stream a moment to produce real frames before judging
+        // brightness off a black/garbage first frame.
+        if(cameraActive) setTimeout(() => { if(sampleCameraTooBright()) brightCooldownUntil = performance.now() + BRIGHT_COOLDOWN_MS; }, 300);
+      });
     } else if(!desired){
       noCamNote.textContent = reason;
+    } else if(cameraActive && sampleCameraTooBright()){
+      brightCooldownUntil = performance.now() + BRIGHT_COOLDOWN_MS;
     }
   }
 
