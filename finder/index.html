@@ -2882,6 +2882,14 @@
       smallOutImg.data[idx]=smallOutImg.data[idx+1]=smallOutImg.data[idx+2]=v;
       smallOutImg.data[idx+3]=255;
     }
+    // The model's raw output is continuous grayscale, not a clean line
+    // drawing — left as-is, that soft tone gets noticeably blurrier once
+    // scaled up from the capped inference resolution to the full working
+    // size. Binarizing here (while still small) gives sharp edges to scale
+    // up in the first place; binarizing AGAIN after scaling removes the
+    // soft edge the upscale's own interpolation reintroduces, so the final
+    // image stays crisp rather than fuzzy at either step.
+    binarizeImageDataInPlace(smallOutImg);
     if(outW===origW && outH===origH) return smallOutImg;
 
     const smallOutCanvas = new OffscreenCanvas(outW, outH);
@@ -2889,8 +2897,44 @@
     const fullOutCanvas = new OffscreenCanvas(origW, origH);
     const fctx = fullOutCanvas.getContext('2d');
     fctx.drawImage(smallOutCanvas, 0, 0, origW, origH);
-    return fctx.getImageData(0, 0, origW, origH);
+    const fullOutImg = fctx.getImageData(0, 0, origW, origH);
+    binarizeImageDataInPlace(fullOutImg);
+    return fullOutImg;
   };
+
+  // Otsu's method: picks the threshold that best splits the image's own
+  // luminance distribution into two classes (line vs. background), so it
+  // adapts to each photo's contrast instead of using one fixed cutoff.
+  function otsuThresholdFromLuminance(imgData){
+    const data = imgData.data, n = data.length/4;
+    let vmax = 0;
+    for(let i=0;i<data.length;i+=4) if(data[i]>vmax) vmax = data[i];
+    if(vmax<=0) return 0;
+    const bins = 256;
+    const hist = new Uint32Array(bins);
+    for(let i=0;i<data.length;i+=4) hist[Math.min(bins-1, Math.round(data[i]/vmax*(bins-1)))]++;
+    let sum=0; for(let b=0;b<bins;b++) sum += b*hist[b];
+    let wB=0, sumB=0, best=0, bestVar=0;
+    for(let b=0;b<bins;b++){
+      wB += hist[b];
+      if(wB===0) continue;
+      const wF = n-wB;
+      if(wF===0) break;
+      sumB += b*hist[b];
+      const mB = sumB/wB, mF = (sum-sumB)/wF;
+      const varBetween = wB*wF*(mB-mF)*(mB-mF);
+      if(varBetween>bestVar){ bestVar=varBetween; best=b; }
+    }
+    return best/(bins-1)*vmax;
+  }
+  function binarizeImageDataInPlace(imgData){
+    const threshold = otsuThresholdFromLuminance(imgData);
+    const data = imgData.data;
+    for(let i=0;i<data.length;i+=4){
+      const v = data[i] > threshold ? 255 : 0;
+      data[i]=data[i+1]=data[i+2]=v;
+    }
+  }
 </script>
 </body>
 </html>
