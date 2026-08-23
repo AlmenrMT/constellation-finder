@@ -517,6 +517,175 @@
     return { w, h, gx, gy };
   }
 
+  // ---------- photo -> line drawing (auto-run once, on a genuinely new upload that looks like a photo) ----------
+  // A plain single-scale DoG/threshold (the earlier attempt at this) looks
+  // noisy on real photo texture (skin, fabric) because nothing removes that
+  // texture before edge detection. This pipeline denoises first with an
+  // edge-preserving bilateral filter, then runs actual Canny-style edge
+  // detection (Sobel gradients -> non-maximum suppression -> hysteresis
+  // thresholding), which is what gives continuous, un-speckled lines instead
+  // of broken/noisy ones. Thresholds are picked automatically (Otsu on the
+  // gradient magnitude) so there's no new slider to tune. Output is always
+  // white edges on black, matching this app's line-drawing convention.
+
+  // True bilateral filtering needs exp() per sample; precomputing both
+  // weight tables as lookup arrays keeps the O(w*h*radius²) inner loop down
+  // to array reads and multiplies.
+  function bilateralFilterGray(gray, w, h, radius, sigmaSpace, sigmaColor){
+    const size = radius*2+1;
+    const spatialLUT = new Float32Array(size*size);
+    for(let dy=-radius;dy<=radius;dy++){
+      for(let dx=-radius;dx<=radius;dx++){
+        spatialLUT[(dy+radius)*size+(dx+radius)] = Math.exp(-(dx*dx+dy*dy)/(2*sigmaSpace*sigmaSpace));
+      }
+    }
+    const rangeLUT = new Float32Array(256);
+    for(let d=0;d<256;d++) rangeLUT[d] = Math.exp(-(d*d)/(2*sigmaColor*sigmaColor));
+
+    const out = new Float32Array(w*h);
+    for(let y=0;y<h;y++){
+      for(let x=0;x<w;x++){
+        const centerVal = gray[y*w+x];
+        let sumW=0, sumV=0;
+        for(let dy=-radius;dy<=radius;dy++){
+          const ny=y+dy; if(ny<0||ny>=h) continue;
+          for(let dx=-radius;dx<=radius;dx++){
+            const nx=x+dx; if(nx<0||nx>=w) continue;
+            const nVal = gray[ny*w+nx];
+            const diff = Math.min(255, Math.round(Math.abs(nVal-centerVal)));
+            const wgt = spatialLUT[(dy+radius)*size+(dx+radius)] * rangeLUT[diff];
+            sumW += wgt; sumV += wgt*nVal;
+          }
+        }
+        out[y*w+x] = sumW>0 ? sumV/sumW : centerVal;
+      }
+    }
+    return out;
+  }
+
+  function sobelOnGray(gray, w, h){
+    const mag = new Float32Array(w*h), dir = new Float32Array(w*h);
+    for(let y=1;y<h-1;y++){
+      for(let x=1;x<w-1;x++){
+        const i = y*w+x;
+        const gx = gray[i-1-w]*-1 + gray[i+1-w]*1 + gray[i-1]*-2 + gray[i+1]*2 + gray[i-1+w]*-1 + gray[i+1+w]*1;
+        const gy = gray[i-w-1]*-1 + gray[i-w]*-2 + gray[i-w+1]*-1 + gray[i+w-1]*1 + gray[i+w]*2 + gray[i+w+1]*1;
+        mag[i] = Math.hypot(gx, gy);
+        dir[i] = Math.atan2(gy, gx);
+      }
+    }
+    return { mag, dir };
+  }
+
+  // For each pixel, keep its gradient magnitude only if it's a local maximum
+  // along the gradient direction (quantized to one of 4 principal
+  // directions) — this is what turns a thick blurry gradient ridge into a
+  // single-pixel-wide line.
+  function nonMaxSuppress(mag, dir, w, h){
+    const out = new Float32Array(w*h);
+    for(let y=1;y<h-1;y++){
+      for(let x=1;x<w-1;x++){
+        const i = y*w+x;
+        const m = mag[i];
+        if(m===0) continue;
+        let angle = dir[i]*180/Math.PI; if(angle<0) angle+=180;
+        let dx1,dy1,dx2,dy2;
+        if(angle<22.5 || angle>=157.5){ dx1=1;dy1=0; dx2=-1;dy2=0; }
+        else if(angle<67.5){ dx1=1;dy1=-1; dx2=-1;dy2=1; }
+        else if(angle<112.5){ dx1=0;dy1=1; dx2=0;dy2=-1; }
+        else { dx1=1;dy1=1; dx2=-1;dy2=-1; }
+        if(m >= mag[(y+dy1)*w+(x+dx1)] && m >= mag[(y+dy2)*w+(x+dx2)]) out[i] = m;
+      }
+    }
+    return out;
+  }
+
+  // Otsu's method: picks the threshold that best splits a value distribution
+  // into two classes (here: edge vs non-edge gradient magnitudes) — used so
+  // the high hysteresis threshold adapts to each photo's own contrast
+  // instead of needing a manual slider.
+  function otsuThreshold(values){
+    let vmax = 0;
+    for(let i=0;i<values.length;i++) if(values[i]>vmax) vmax = values[i];
+    if(vmax<=0) return 0;
+    const bins = 256;
+    const hist = new Uint32Array(bins);
+    for(let i=0;i<values.length;i++) hist[Math.min(bins-1, Math.floor(values[i]/vmax*(bins-1)))]++;
+    const total = values.length;
+    let sum=0; for(let b=0;b<bins;b++) sum += b*hist[b];
+    let wB=0, sumB=0, best=0, bestVar=0;
+    for(let b=0;b<bins;b++){
+      wB += hist[b];
+      if(wB===0) continue;
+      const wF = total-wB;
+      if(wF===0) break;
+      sumB += b*hist[b];
+      const mB = sumB/wB, mF = (sum-sumB)/wF;
+      const varBetween = wB*wF*(mB-mF)*(mB-mF);
+      if(varBetween>bestVar){ bestVar=varBetween; best=b; }
+    }
+    return best/(bins-1)*vmax;
+  }
+
+  // Strong edges (>=high) are kept outright; weak edges (>=low) are kept
+  // only if connected to a strong edge — this is what lets a real edge stay
+  // whole even where its contrast dips slightly, without letting isolated
+  // noise pixels through.
+  function hysteresis(suppressed, w, h, lowT, highT){
+    const keep = new Uint8Array(w*h);
+    const visited = new Uint8Array(w*h);
+    const stack = [];
+    for(let i=0;i<w*h;i++){ if(suppressed[i]>=highT){ keep[i]=1; visited[i]=1; stack.push(i); } }
+    while(stack.length){
+      const idx = stack.pop();
+      const x = idx%w, y = (idx/w)|0;
+      for(const [dx,dy] of NBR8){
+        const nx=x+dx, ny=y+dy;
+        if(nx<0||ny<0||nx>=w||ny>=h) continue;
+        const nidx = ny*w+nx;
+        if(!visited[nidx] && suppressed[nidx]>=lowT){ visited[nidx]=1; keep[nidx]=1; stack.push(nidx); }
+      }
+    }
+    return keep;
+  }
+
+  // A finished line drawing is almost entirely near-pure black/white already
+  // (background + strokes); a real photo's tones are spread across the
+  // range. Used to only run the conversion below on genuine photos, so a
+  // clean drawing re-opened later isn't needlessly reprocessed.
+  function looksLikePhoto(imgData){
+    const data = imgData.data;
+    let extreme = 0;
+    const total = data.length/4;
+    for(let i=0;i<data.length;i+=4){
+      const v = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+      if(v<20 || v>235) extreme++;
+    }
+    return (extreme/total) < 0.9;
+  }
+
+  function buildLineDrawingFromPhoto(imgData){
+    const w = imgData.width, h = imgData.height, data = imgData.data;
+    const n = w*h;
+    const gray = new Float32Array(n);
+    for(let i=0,p=0;i<data.length;i+=4,p++) gray[p] = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+
+    const denoised = bilateralFilterGray(gray, w, h, 3, 3, 25);
+    const { mag, dir } = sobelOnGray(denoised, w, h);
+    const suppressed = nonMaxSuppress(mag, dir, w, h);
+    const highT = otsuThreshold(suppressed);
+    const edges = hysteresis(suppressed, w, h, highT*0.4, highT);
+
+    const out = new ImageData(w, h);
+    for(let p=0;p<n;p++){
+      const val = edges[p] ? 255 : 0;
+      const idx = p*4;
+      out.data[idx]=out.data[idx+1]=out.data[idx+2]=val;
+      out.data[idx+3]=255;
+    }
+    return out;
+  }
+
   // ---------- local color inversion (replaces pinetools.com/invert-image-colors) ----------
   function invertImageData(imgData){
     const out = new ImageData(imgData.width, imgData.height);
@@ -839,6 +1008,23 @@
     cleanBackdropCanvas.width = w; cleanBackdropCanvas.height = h;
     const ctx = cleanBackdropCanvas.getContext('2d');
     ctx.drawImage(originalPhotoImg, 0, 0, w, h);
+
+    // A genuinely new upload that isn't already a line drawing gets
+    // converted once, automatically — see buildLineDrawingFromPhoto. The
+    // result REPLACES originalPhotoImg (not just this canvas), so later
+    // invert/line-width recomputes keep working from the line drawing
+    // instead of re-drawing the raw photo underneath it every time.
+    if(isNewImage && looksLikePhoto(ctx.getImageData(0,0,w,h))){
+      autoStatus.textContent = 'Turning your photo into a line drawing…';
+      await new Promise(r => setTimeout(r, 0)); // let the status message paint before the heavy synchronous work below
+      const lineArt = buildLineDrawingFromPhoto(ctx.getImageData(0,0,w,h));
+      ctx.putImageData(lineArt, 0, 0);
+      const converted = document.createElement('canvas');
+      converted.width = w; converted.height = h;
+      converted.getContext('2d').putImageData(lineArt, 0, 0);
+      originalPhotoImg = converted;
+    }
+
     if(lineWidthValue !== 0 || invertOn){
       let imgData = ctx.getImageData(0, 0, w, h);
       imgData = applyLineWidthImageData(imgData, lineWidthValue);
