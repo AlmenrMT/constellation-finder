@@ -7,7 +7,6 @@
 <script src="stars.js"></script>
 <script src="field.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.10.0/dist/ort.js"></script>
 <style>
   :root{
     --bg:#1b1c20; --panel:#26272c; --border:#3a3b41; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe;
@@ -82,8 +81,8 @@
       <input type="checkbox" id="invertToggle" style="width:auto;">
       <span style="font-size:12px; color:var(--text);">Invert colors</span>
     </label>
-    <label>Line width <span class="val" id="lineWidthVal">0</span></label>
-    <input type="range" id="lineWidthSlider" min="0" max="3" step="0.01" value="0">
+    <label>Line width — thinner ← 0 → thicker <span class="val" id="lineWidthVal">0</span></label>
+    <input type="range" id="lineWidthSlider" min="-3" max="3" step="0.01" value="0">
 
     <label>Light-intensity weight <span class="val" id="weightVal"></span></label>
     <input type="range" id="weight" min="0" max="1.5" step="0.05" value="0.5">
@@ -261,7 +260,7 @@
   }
   let originalPhotoImg = null; // the finished line drawing as uploaded, kept aside so Invert/Line width always recompute from a clean copy instead of compounding
   let invertOn = false;
-  let lineWidthValue = 0; // 0..3 pixels of dilation, 0 = unchanged
+  let lineWidthValue = 0; // -3..3 pixels; positive thickens, negative thins, 0 = unchanged
   const FINDER_SIZE = 720;
 
   function stripExtension(name){
@@ -518,272 +517,6 @@
     return { w, h, gx, gy };
   }
 
-  // ---------- photo -> line drawing (auto-run once, on a genuinely new upload that looks like a photo) ----------
-  // A plain single-scale DoG/threshold (the earlier attempt at this) looks
-  // noisy on real photo texture (skin, fabric) because nothing removes that
-  // texture before edge detection. This pipeline denoises first with an
-  // edge-preserving bilateral filter, then runs actual Canny-style edge
-  // detection (Sobel gradients -> non-maximum suppression -> hysteresis
-  // thresholding), which is what gives continuous, un-speckled lines instead
-  // of broken/noisy ones. Thresholds are picked automatically (Otsu on the
-  // gradient magnitude) so there's no new slider to tune. Output is always
-  // white edges on black, matching this app's line-drawing convention.
-
-  // True bilateral filtering needs exp() per sample; precomputing both
-  // weight tables as lookup arrays keeps the O(w*h*radius²) inner loop down
-  // to array reads and multiplies.
-  function bilateralFilterGray(gray, w, h, radius, sigmaSpace, sigmaColor){
-    const size = radius*2+1;
-    const spatialLUT = new Float32Array(size*size);
-    for(let dy=-radius;dy<=radius;dy++){
-      for(let dx=-radius;dx<=radius;dx++){
-        spatialLUT[(dy+radius)*size+(dx+radius)] = Math.exp(-(dx*dx+dy*dy)/(2*sigmaSpace*sigmaSpace));
-      }
-    }
-    const rangeLUT = new Float32Array(256);
-    for(let d=0;d<256;d++) rangeLUT[d] = Math.exp(-(d*d)/(2*sigmaColor*sigmaColor));
-
-    const out = new Float32Array(w*h);
-    for(let y=0;y<h;y++){
-      for(let x=0;x<w;x++){
-        const centerVal = gray[y*w+x];
-        let sumW=0, sumV=0;
-        for(let dy=-radius;dy<=radius;dy++){
-          const ny=y+dy; if(ny<0||ny>=h) continue;
-          for(let dx=-radius;dx<=radius;dx++){
-            const nx=x+dx; if(nx<0||nx>=w) continue;
-            const nVal = gray[ny*w+nx];
-            const diff = Math.min(255, Math.round(Math.abs(nVal-centerVal)));
-            const wgt = spatialLUT[(dy+radius)*size+(dx+radius)] * rangeLUT[diff];
-            sumW += wgt; sumV += wgt*nVal;
-          }
-        }
-        out[y*w+x] = sumW>0 ? sumV/sumW : centerVal;
-      }
-    }
-    return out;
-  }
-
-  function sobelOnGray(gray, w, h){
-    const mag = new Float32Array(w*h), dir = new Float32Array(w*h);
-    for(let y=1;y<h-1;y++){
-      for(let x=1;x<w-1;x++){
-        const i = y*w+x;
-        const gx = gray[i-1-w]*-1 + gray[i+1-w]*1 + gray[i-1]*-2 + gray[i+1]*2 + gray[i-1+w]*-1 + gray[i+1+w]*1;
-        const gy = gray[i-w-1]*-1 + gray[i-w]*-2 + gray[i-w+1]*-1 + gray[i+w-1]*1 + gray[i+w]*2 + gray[i+w+1]*1;
-        mag[i] = Math.hypot(gx, gy);
-        dir[i] = Math.atan2(gy, gx);
-      }
-    }
-    return { mag, dir };
-  }
-
-  // For each pixel, keep its gradient magnitude only if it's a local maximum
-  // along the gradient direction (quantized to one of 4 principal
-  // directions) — this is what turns a thick blurry gradient ridge into a
-  // single-pixel-wide line.
-  function nonMaxSuppress(mag, dir, w, h){
-    const out = new Float32Array(w*h);
-    for(let y=1;y<h-1;y++){
-      for(let x=1;x<w-1;x++){
-        const i = y*w+x;
-        const m = mag[i];
-        if(m===0) continue;
-        let angle = dir[i]*180/Math.PI; if(angle<0) angle+=180;
-        let dx1,dy1,dx2,dy2;
-        if(angle<22.5 || angle>=157.5){ dx1=1;dy1=0; dx2=-1;dy2=0; }
-        else if(angle<67.5){ dx1=1;dy1=-1; dx2=-1;dy2=1; }
-        else if(angle<112.5){ dx1=0;dy1=1; dx2=0;dy2=-1; }
-        else { dx1=1;dy1=1; dx2=-1;dy2=-1; }
-        if(m >= mag[(y+dy1)*w+(x+dx1)] && m >= mag[(y+dy2)*w+(x+dx2)]) out[i] = m;
-      }
-    }
-    return out;
-  }
-
-  // Otsu's method: picks the threshold that best splits a value distribution
-  // into two classes (here: edge vs non-edge gradient magnitudes) — used so
-  // the high hysteresis threshold adapts to each photo's own contrast
-  // instead of needing a manual slider.
-  function otsuThreshold(values){
-    let vmax = 0;
-    for(let i=0;i<values.length;i++) if(values[i]>vmax) vmax = values[i];
-    if(vmax<=0) return 0;
-    const bins = 256;
-    const hist = new Uint32Array(bins);
-    for(let i=0;i<values.length;i++) hist[Math.min(bins-1, Math.floor(values[i]/vmax*(bins-1)))]++;
-    const total = values.length;
-    let sum=0; for(let b=0;b<bins;b++) sum += b*hist[b];
-    let wB=0, sumB=0, best=0, bestVar=0;
-    for(let b=0;b<bins;b++){
-      wB += hist[b];
-      if(wB===0) continue;
-      const wF = total-wB;
-      if(wF===0) break;
-      sumB += b*hist[b];
-      const mB = sumB/wB, mF = (sum-sumB)/wF;
-      const varBetween = wB*wF*(mB-mF)*(mB-mF);
-      if(varBetween>bestVar){ bestVar=varBetween; best=b; }
-    }
-    return best/(bins-1)*vmax;
-  }
-
-  // Strong edges (>=high) are kept outright; weak edges (>=low) are kept
-  // only if connected to a strong edge — this is what lets a real edge stay
-  // whole even where its contrast dips slightly, without letting isolated
-  // noise pixels through. highTMap is a per-pixel threshold (see
-  // adaptiveEdgeThreshold below) rather than one global number: a single
-  // global cutoff, tuned to survive a photo's strongest edges (glasses,
-  // hairline), is inevitably too strict for a real but locally weaker
-  // contour (a soft jaw or cheek shadow) elsewhere in the same photo — which
-  // is exactly what breaks those contours into dashes instead of one
-  // continuous line.
-  function hysteresisAdaptive(suppressed, w, h, highTMap, lowRatio){
-    const keep = new Uint8Array(w*h);
-    const visited = new Uint8Array(w*h);
-    const stack = [];
-    for(let i=0;i<w*h;i++){ if(suppressed[i]>=highTMap[i]){ keep[i]=1; visited[i]=1; stack.push(i); } }
-    while(stack.length){
-      const idx = stack.pop();
-      const x = idx%w, y = (idx/w)|0;
-      for(const [dx,dy] of NBR8){
-        const nx=x+dx, ny=y+dy;
-        if(nx<0||ny<0||nx>=w||ny>=h) continue;
-        const nidx = ny*w+nx;
-        if(!visited[nidx] && suppressed[nidx]>=highTMap[nidx]*lowRatio){ visited[nidx]=1; keep[nidx]=1; stack.push(nidx); }
-      }
-    }
-    return keep;
-  }
-
-  // Runs Otsu independently on each tile of the gradient-magnitude image,
-  // then bilinearly interpolates between tile centers into a smooth
-  // per-pixel threshold map (no blocky seams at tile edges). This is what
-  // lets a locally faint but real contour get its own appropriate cutoff
-  // instead of inheriting one set by the strongest edges anywhere else in
-  // the photo.
-  //
-  // A tile with no real edge content at all has nothing bimodal for Otsu to
-  // split, so it can land on an arbitrarily low threshold — verified this
-  // directly: a flat tile's own Otsu came out at ~1 (on a 0-255-ish scale),
-  // letting almost any residual noise through as a false "edge" in supposedly
-  // flat regions. floorFraction clamps every tile's threshold to at least
-  // this fraction of the image's global Otsu threshold, which fixes that
-  // (flat tiles get a sane floor) without constraining tiles that already
-  // have a real, clearly-separated local edge population (their own Otsu
-  // result already sits above the floor).
-  function adaptiveEdgeThreshold(suppressed, w, h, tileSize, floorFraction){
-    const tilesX = Math.max(1, Math.ceil(w/tileSize));
-    const tilesY = Math.max(1, Math.ceil(h/tileSize));
-    const floor = otsuThreshold(suppressed) * floorFraction;
-    const tileThresh = new Float32Array(tilesX*tilesY);
-    for(let ty=0; ty<tilesY; ty++){
-      for(let tx=0; tx<tilesX; tx++){
-        const x0=tx*tileSize, y0=ty*tileSize;
-        const x1=Math.min(w,x0+tileSize), y1=Math.min(h,y0+tileSize);
-        const vals = [];
-        for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++) vals.push(suppressed[y*w+x]);
-        tileThresh[ty*tilesX+tx] = Math.max(otsuThreshold(vals), floor);
-      }
-    }
-    const out = new Float32Array(w*h);
-    for(let y=0;y<h;y++){
-      const fy = y/tileSize - 0.5;
-      const ty0raw = Math.floor(fy), fracY = fy-ty0raw;
-      const ty0 = Math.max(0, Math.min(tilesY-1, ty0raw)), ty1 = Math.max(0, Math.min(tilesY-1, ty0raw+1));
-      for(let x=0;x<w;x++){
-        const fx = x/tileSize - 0.5;
-        const tx0raw = Math.floor(fx), fracX = fx-tx0raw;
-        const tx0 = Math.max(0, Math.min(tilesX-1, tx0raw)), tx1 = Math.max(0, Math.min(tilesX-1, tx0raw+1));
-        const t00=tileThresh[ty0*tilesX+tx0], t10=tileThresh[ty0*tilesX+tx1];
-        const t01=tileThresh[ty1*tilesX+tx0], t11=tileThresh[ty1*tilesX+tx1];
-        const top = t00*(1-fracX) + t10*fracX, bot = t01*(1-fracX) + t11*fracX;
-        out[y*w+x] = top*(1-fracY) + bot*fracY;
-      }
-    }
-    return out;
-  }
-
-  // Small dilate-then-erode (a "closing") to bridge the short gaps that are
-  // still left after hysteresis — a handful of pixels along an otherwise
-  // continuous contour dipping just under even the locally-adapted
-  // threshold. A small enough radius bridges gaps without visibly
-  // thickening real strokes, since dilating and eroding by the same amount
-  // mostly cancels out everywhere except in those small gaps.
-  function dilateBinary(bin, w, h, radius){
-    const out = new Uint8Array(w*h);
-    for(let y=0;y<h;y++) for(let x=0;x<w;x++){
-      let v=0;
-      for(let dy=-radius;dy<=radius && !v;dy++){
-        const ny=y+dy; if(ny<0||ny>=h) continue;
-        for(let dx=-radius;dx<=radius;dx++){
-          const nx=x+dx; if(nx<0||nx>=w) continue;
-          if(bin[ny*w+nx]){ v=1; break; }
-        }
-      }
-      out[y*w+x]=v;
-    }
-    return out;
-  }
-  function erodeBinary(bin, w, h, radius){
-    const out = new Uint8Array(w*h);
-    for(let y=0;y<h;y++) for(let x=0;x<w;x++){
-      let v=1;
-      for(let dy=-radius;dy<=radius && v;dy++){
-        const ny=y+dy;
-        for(let dx=-radius;dx<=radius;dx++){
-          const nx=x+dx;
-          const val = (ny<0||ny>=h||nx<0||nx>=w) ? 0 : bin[ny*w+nx];
-          if(!val){ v=0; break; }
-        }
-      }
-      out[y*w+x]=v;
-    }
-    return out;
-  }
-  function morphClose(bin, w, h, radius){
-    return erodeBinary(dilateBinary(bin, w, h, radius), w, h, radius);
-  }
-
-  // A finished line drawing is almost entirely near-pure black/white already
-  // (background + strokes); a real photo's tones are spread across the
-  // range. Used to only run the conversion below on genuine photos, so a
-  // clean drawing re-opened later isn't needlessly reprocessed.
-  function looksLikePhoto(imgData){
-    const data = imgData.data;
-    let extreme = 0;
-    const total = data.length/4;
-    for(let i=0;i<data.length;i+=4){
-      const v = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
-      if(v<20 || v>235) extreme++;
-    }
-    return (extreme/total) < 0.9;
-  }
-
-  function buildLineDrawingFromPhoto(imgData){
-    const w = imgData.width, h = imgData.height, data = imgData.data;
-    const n = w*h;
-    const gray = new Float32Array(n);
-    for(let i=0,p=0;i<data.length;i+=4,p++) gray[p] = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
-
-    const denoised = bilateralFilterGray(gray, w, h, 3, 3, 25);
-    const { mag, dir } = sobelOnGray(denoised, w, h);
-    const suppressed = nonMaxSuppress(mag, dir, w, h);
-    const tileSize = Math.max(24, Math.round(Math.min(w,h)/10));
-    const highTMap = adaptiveEdgeThreshold(suppressed, w, h, tileSize, 0.3);
-    const edges = hysteresisAdaptive(suppressed, w, h, highTMap, 0.4);
-    const closed = morphClose(edges, w, h, 2);
-
-    const out = new ImageData(w, h);
-    for(let p=0;p<n;p++){
-      const val = closed[p] ? 255 : 0;
-      const idx = p*4;
-      out.data[idx]=out.data[idx+1]=out.data[idx+2]=val;
-      out.data[idx+3]=255;
-    }
-    return out;
-  }
-
   // ---------- local color inversion (replaces pinetools.com/invert-image-colors) ----------
   function invertImageData(imgData){
     const out = new ImageData(imgData.width, imgData.height);
@@ -794,29 +527,20 @@
     return out;
   }
 
-  // ---------- line width: thickens lines by dilating them outward ----------
-  // Uses a chamfer distance transform (a fast, close approximation of true
-  // Euclidean distance) from every pixel to the nearest foreground pixel,
-  // computed once in two passes, then thresholds that distance against
-  // `amount`. Thresholding a continuous distance is what lets amount be any
-  // fractional pixel count (not just whole numbers) while the output stays
-  // pure black/white — the threshold itself is still a hard yes/no test, so
-  // there's never a gray gradient at the new edge.
-  function applyLineWidthImageData(imgData, amount){
-    if(!amount) return imgData;
-    const w = imgData.width, h = imgData.height, data = imgData.data;
-    const n = w*h;
-    // Binarize to pure black/white first — taking the distance transform of
-    // raw (anti-aliased) luminance would let partial gray edge pixels count
-    // as "foreground", fuzzing the result.
-    const fg = new Uint8Array(n);
-    for(let i=0,p=0;i<data.length;i+=4,p++){
-      const v = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
-      fg[p] = v > 127.5 ? 1 : 0;
-    }
-    const INF = 1e9;
+  // ---------- line width: thickens (positive) or thins (negative) lines ----------
+  // A chamfer distance transform (a fast, close approximation of true
+  // Euclidean distance, two passes) computes every pixel's distance to the
+  // nearest pixel where `seed` is true. Thickening measures distance-to-
+  // foreground (grow toward it); thinning measures distance-to-background
+  // (how deep inside the stroke a pixel is, so it can shrink away from the
+  // edge). Thresholding a continuous distance is what lets amount be any
+  // fractional pixel count while the output stays pure black/white — the
+  // threshold itself is still a hard yes/no test, so there's never a gray
+  // gradient at the new edge.
+  function chamferDistanceTransform(seed, w, h){
+    const n = w*h, INF = 1e9;
     const dist = new Float32Array(n);
-    for(let p=0;p<n;p++) dist[p] = fg[p] ? 0 : INF;
+    for(let p=0;p<n;p++) dist[p] = seed[p] ? 0 : INF;
     const D1 = 1, D2 = Math.SQRT2;
     for(let y=0;y<h;y++){
       const row = y*w;
@@ -846,12 +570,60 @@
         dist[i] = best;
       }
     }
+    return dist;
+  }
+
+  function applyLineWidthImageData(imgData, amount){
+    if(!amount) return imgData;
+    const w = imgData.width, h = imgData.height, data = imgData.data;
+    const n = w*h;
+    // Binarize to pure black/white first — taking the distance transform of
+    // raw (anti-aliased) luminance would let partial gray edge pixels count
+    // as "foreground", fuzzing the result.
+    const fg = new Uint8Array(n);
+    for(let i=0,p=0;i<data.length;i+=4,p++){
+      const v = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+      fg[p] = v > 127.5 ? 1 : 0;
+    }
+
     const out = new ImageData(w, h);
-    for(let p=0;p<n;p++){
-      const val = dist[p] <= amount ? 255 : 0;
-      const idx = p*4;
-      out.data[idx]=out.data[idx+1]=out.data[idx+2]=val;
-      out.data[idx+3]=255;
+    if(amount > 0){
+      const dist = chamferDistanceTransform(fg, w, h);
+      for(let p=0;p<n;p++){
+        const val = dist[p] <= amount ? 255 : 0;
+        const idx = p*4;
+        out.data[idx]=out.data[idx+1]=out.data[idx+2]=val;
+        out.data[idx+3]=255;
+      }
+    } else {
+      // Thinning: shrink each stroke away from its edge by |amount|, but
+      // never past its own medial skeleton (a local maximum of "distance to
+      // background") — a 1px-wide line is already at its own skeleton, so
+      // it survives any amount of thinning instead of vanishing outright;
+      // a thicker stroke shrinks normally until it too reaches that limit.
+      const bg = new Uint8Array(n);
+      for(let p=0;p<n;p++) bg[p] = fg[p] ? 0 : 1;
+      const distToBg = chamferDistanceTransform(bg, w, h);
+      const erodeAmount = -amount;
+      for(let p=0;p<n;p++){
+        let val = 0;
+        if(fg[p]){
+          const x = p%w, y = (p/w)|0;
+          let isSkeleton = true;
+          for(let dy=-1;dy<=1 && isSkeleton;dy++){
+            for(let dx=-1;dx<=1;dx++){
+              if(!dx && !dy) continue;
+              const nx=x+dx, ny=y+dy;
+              if(nx<0||ny<0||nx>=w||ny>=h) continue;
+              if(distToBg[ny*w+nx] > distToBg[p]){ isSkeleton=false; break; }
+            }
+          }
+          val = (distToBg[p] > erodeAmount || isSkeleton) ? 255 : 0;
+        }
+        const idx = p*4;
+        out.data[idx]=out.data[idx+1]=out.data[idx+2]=val;
+        out.data[idx+3]=255;
+      }
     }
     return out;
   }
@@ -1107,35 +879,6 @@
     const ctx = cleanBackdropCanvas.getContext('2d');
     ctx.drawImage(originalPhotoImg, 0, 0, w, h);
 
-    // A genuinely new upload that isn't already a line drawing gets
-    // converted once, automatically. Tries the real pretrained model first
-    // (window.buildLineDrawingML, see the <script> block near the face
-    // landmarker) for real-drawing-quality results; if that model hasn't
-    // loaded, has no internet to fetch on first use, or errors during
-    // inference for any reason, this quietly falls back to the classical
-    // bilateral-filter/Canny pipeline (buildLineDrawingFromPhoto) instead of
-    // leaving the upload unconverted. Either way, the result REPLACES
-    // originalPhotoImg (not just this canvas), so later invert/line-width
-    // recomputes keep working from the line drawing instead of re-drawing
-    // the raw photo underneath it every time.
-    if(isNewImage && looksLikePhoto(ctx.getImageData(0,0,w,h))){
-      autoStatus.textContent = 'Turning your photo into a line drawing…';
-      await new Promise(r => setTimeout(r, 0)); // let the status message paint before the heavy work below
-      let lineArt;
-      try{
-        lineArt = await window.buildLineDrawingML(ctx.getImageData(0,0,w,h));
-      }catch(err){
-        console.warn('ML line-art conversion unavailable, using the classical pipeline instead.', err);
-        lineArt = buildLineDrawingFromPhoto(ctx.getImageData(0,0,w,h));
-      }
-      cleanBackdropCanvas.width = lineArt.width; cleanBackdropCanvas.height = lineArt.height;
-      ctx.putImageData(lineArt, 0, 0);
-      const converted = document.createElement('canvas');
-      converted.width = lineArt.width; converted.height = lineArt.height;
-      converted.getContext('2d').putImageData(lineArt, 0, 0);
-      originalPhotoImg = converted;
-    }
-
     if(lineWidthValue !== 0 || invertOn){
       let imgData = ctx.getImageData(0, 0, w, h);
       imgData = applyLineWidthImageData(imgData, lineWidthValue);
@@ -1161,7 +904,7 @@
   let lineWidthTimer = null;
   document.getElementById('lineWidthSlider').addEventListener('input', e => {
     lineWidthValue = parseFloat(e.target.value);
-    document.getElementById('lineWidthVal').textContent = lineWidthValue.toFixed(2);
+    document.getElementById('lineWidthVal').textContent = (lineWidthValue>0?'+':'')+lineWidthValue.toFixed(2);
     if(lineWidthTimer) clearTimeout(lineWidthTimer);
     lineWidthTimer = setTimeout(() => recomputeActiveImage(false), 120);
   });
@@ -2807,134 +2550,5 @@
   };
 </script>
 
-<!-- Photo -> line-drawing via a real pretrained model (Informative Drawings,
-     MIT-licensed: https://github.com/carolineec/informative-drawings), not
-     just classical edge detection. Same "load a model, run it locally"
-     pattern as the face-landmark block above. If the model fails to load or
-     errors during inference (offline, slow connection on first use, no WASM
-     support, etc.), window.buildLineDrawingML rejects and the caller in the
-     main app falls back to the classical bilateral-filter/Canny pipeline —
-     every upload still produces a usable line drawing either way. -->
-<script>
-  ort.env.wasm.proxy = true; // keeps WASM inference off the main thread
-  if(self.crossOriginIsolated) ort.env.wasm.numThreads = navigator.hardwareConcurrency;
-
-  let lineArtSessionPromise = null;
-  function getLineArtSession(){
-    if(!lineArtSessionPromise){
-      lineArtSessionPromise = ort.InferenceSession.create('line-art-model.onnx', { executionProviders: ['wasm'] })
-        .catch(err => {
-          console.warn('Line-art model failed to load — photo uploads will use the classical sketch pipeline instead.', err);
-          lineArtSessionPromise = null;
-          throw err;
-        });
-    }
-    return lineArtSessionPromise;
-  }
-  // Start loading in the background as soon as the page opens, so the model
-  // is likely already warmed up by the time someone uploads a photo. Not
-  // awaited here — a failure just means the first real call below retries
-  // and falls back, same as if this warm-up had never run.
-  getLineArtSession().catch(() => {});
-
-  // Fully convolutional, so it'll happily run at any resolution — but cost
-  // scales with pixel count, and measured directly: ~2.7s at 256px, ~7.6s at
-  // 400px, ~30s at 800px (this app's usual working resolution). 30s fails
-  // "a few seconds is fine" badly, so inference always runs at a capped
-  // resolution and the result is scaled back up to match the input — same
-  // contract as the classical pipeline (same dimensions out as in).
-  const ML_MAX_DIM = 384;
-  window.buildLineDrawingML = async function(imgData){
-    const session = await getLineArtSession(); // throws -> caller falls back
-    const origW = imgData.width, origH = imgData.height;
-    const scale = Math.min(1, ML_MAX_DIM/Math.max(origW,origH));
-    const w = Math.max(1,Math.round(origW*scale)), h = Math.max(1,Math.round(origH*scale));
-
-    let d;
-    if(scale === 1){
-      d = imgData.data;
-    } else {
-      const srcCanvas = new OffscreenCanvas(origW, origH);
-      srcCanvas.getContext('2d').putImageData(imgData, 0, 0);
-      const smallCanvas = new OffscreenCanvas(w, h);
-      smallCanvas.getContext('2d').drawImage(srcCanvas, 0, 0, w, h);
-      d = smallCanvas.getContext('2d').getImageData(0, 0, w, h).data;
-    }
-
-    const n = w*h;
-    const tensorData = new Float32Array(3*n);
-    for(let i=0,p=0;i<d.length;i+=4,p++){
-      tensorData[p] = d[i]/255;         // R plane
-      tensorData[n+p] = d[i+1]/255;     // G plane
-      tensorData[2*n+p] = d[i+2]/255;   // B plane
-    }
-    const feeds = { input: new ort.Tensor('float32', tensorData, [1, 3, h, w]) };
-    const results = await session.run(feeds);
-    const out = results['output'];
-    const outW = out.dims[3], outH = out.dims[2];
-    const smallOutImg = new ImageData(outW, outH);
-    for(let p=0;p<outW*outH;p++){
-      // The model draws traditional line art (dark ink on a light page: near
-      // 1 = page, near 0 = ink) — this app's convention is the opposite
-      // (white lines on black), so invert.
-      const v = Math.max(0, Math.min(255, (1-out.data[p])*255));
-      const idx = p*4;
-      smallOutImg.data[idx]=smallOutImg.data[idx+1]=smallOutImg.data[idx+2]=v;
-      smallOutImg.data[idx+3]=255;
-    }
-    // The model's raw output is continuous grayscale, not a clean line
-    // drawing — left as-is, that soft tone gets noticeably blurrier once
-    // scaled up from the capped inference resolution to the full working
-    // size. Binarizing here (while still small) gives sharp edges to scale
-    // up in the first place; binarizing AGAIN after scaling removes the
-    // soft edge the upscale's own interpolation reintroduces, so the final
-    // image stays crisp rather than fuzzy at either step.
-    binarizeImageDataInPlace(smallOutImg);
-    if(outW===origW && outH===origH) return smallOutImg;
-
-    const smallOutCanvas = new OffscreenCanvas(outW, outH);
-    smallOutCanvas.getContext('2d').putImageData(smallOutImg, 0, 0);
-    const fullOutCanvas = new OffscreenCanvas(origW, origH);
-    const fctx = fullOutCanvas.getContext('2d');
-    fctx.drawImage(smallOutCanvas, 0, 0, origW, origH);
-    const fullOutImg = fctx.getImageData(0, 0, origW, origH);
-    binarizeImageDataInPlace(fullOutImg);
-    return fullOutImg;
-  };
-
-  // Otsu's method: picks the threshold that best splits the image's own
-  // luminance distribution into two classes (line vs. background), so it
-  // adapts to each photo's contrast instead of using one fixed cutoff.
-  function otsuThresholdFromLuminance(imgData){
-    const data = imgData.data, n = data.length/4;
-    let vmax = 0;
-    for(let i=0;i<data.length;i+=4) if(data[i]>vmax) vmax = data[i];
-    if(vmax<=0) return 0;
-    const bins = 256;
-    const hist = new Uint32Array(bins);
-    for(let i=0;i<data.length;i+=4) hist[Math.min(bins-1, Math.round(data[i]/vmax*(bins-1)))]++;
-    let sum=0; for(let b=0;b<bins;b++) sum += b*hist[b];
-    let wB=0, sumB=0, best=0, bestVar=0;
-    for(let b=0;b<bins;b++){
-      wB += hist[b];
-      if(wB===0) continue;
-      const wF = n-wB;
-      if(wF===0) break;
-      sumB += b*hist[b];
-      const mB = sumB/wB, mF = (sum-sumB)/wF;
-      const varBetween = wB*wF*(mB-mF)*(mB-mF);
-      if(varBetween>bestVar){ bestVar=varBetween; best=b; }
-    }
-    return best/(bins-1)*vmax;
-  }
-  function binarizeImageDataInPlace(imgData){
-    const threshold = otsuThresholdFromLuminance(imgData);
-    const data = imgData.data;
-    for(let i=0;i<data.length;i+=4){
-      const v = data[i] > threshold ? 255 : 0;
-      data[i]=data[i+1]=data[i+2]=v;
-    }
-  }
-</script>
 </body>
 </html>
