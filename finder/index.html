@@ -630,12 +630,18 @@
   // Strong edges (>=high) are kept outright; weak edges (>=low) are kept
   // only if connected to a strong edge — this is what lets a real edge stay
   // whole even where its contrast dips slightly, without letting isolated
-  // noise pixels through.
-  function hysteresis(suppressed, w, h, lowT, highT){
+  // noise pixels through. highTMap is a per-pixel threshold (see
+  // adaptiveEdgeThreshold below) rather than one global number: a single
+  // global cutoff, tuned to survive a photo's strongest edges (glasses,
+  // hairline), is inevitably too strict for a real but locally weaker
+  // contour (a soft jaw or cheek shadow) elsewhere in the same photo — which
+  // is exactly what breaks those contours into dashes instead of one
+  // continuous line.
+  function hysteresisAdaptive(suppressed, w, h, highTMap, lowRatio){
     const keep = new Uint8Array(w*h);
     const visited = new Uint8Array(w*h);
     const stack = [];
-    for(let i=0;i<w*h;i++){ if(suppressed[i]>=highT){ keep[i]=1; visited[i]=1; stack.push(i); } }
+    for(let i=0;i<w*h;i++){ if(suppressed[i]>=highTMap[i]){ keep[i]=1; visited[i]=1; stack.push(i); } }
     while(stack.length){
       const idx = stack.pop();
       const x = idx%w, y = (idx/w)|0;
@@ -643,10 +649,99 @@
         const nx=x+dx, ny=y+dy;
         if(nx<0||ny<0||nx>=w||ny>=h) continue;
         const nidx = ny*w+nx;
-        if(!visited[nidx] && suppressed[nidx]>=lowT){ visited[nidx]=1; keep[nidx]=1; stack.push(nidx); }
+        if(!visited[nidx] && suppressed[nidx]>=highTMap[nidx]*lowRatio){ visited[nidx]=1; keep[nidx]=1; stack.push(nidx); }
       }
     }
     return keep;
+  }
+
+  // Runs Otsu independently on each tile of the gradient-magnitude image,
+  // then bilinearly interpolates between tile centers into a smooth
+  // per-pixel threshold map (no blocky seams at tile edges). This is what
+  // lets a locally faint but real contour get its own appropriate cutoff
+  // instead of inheriting one set by the strongest edges anywhere else in
+  // the photo.
+  //
+  // A tile with no real edge content at all has nothing bimodal for Otsu to
+  // split, so it can land on an arbitrarily low threshold — verified this
+  // directly: a flat tile's own Otsu came out at ~1 (on a 0-255-ish scale),
+  // letting almost any residual noise through as a false "edge" in supposedly
+  // flat regions. floorFraction clamps every tile's threshold to at least
+  // this fraction of the image's global Otsu threshold, which fixes that
+  // (flat tiles get a sane floor) without constraining tiles that already
+  // have a real, clearly-separated local edge population (their own Otsu
+  // result already sits above the floor).
+  function adaptiveEdgeThreshold(suppressed, w, h, tileSize, floorFraction){
+    const tilesX = Math.max(1, Math.ceil(w/tileSize));
+    const tilesY = Math.max(1, Math.ceil(h/tileSize));
+    const floor = otsuThreshold(suppressed) * floorFraction;
+    const tileThresh = new Float32Array(tilesX*tilesY);
+    for(let ty=0; ty<tilesY; ty++){
+      for(let tx=0; tx<tilesX; tx++){
+        const x0=tx*tileSize, y0=ty*tileSize;
+        const x1=Math.min(w,x0+tileSize), y1=Math.min(h,y0+tileSize);
+        const vals = [];
+        for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++) vals.push(suppressed[y*w+x]);
+        tileThresh[ty*tilesX+tx] = Math.max(otsuThreshold(vals), floor);
+      }
+    }
+    const out = new Float32Array(w*h);
+    for(let y=0;y<h;y++){
+      const fy = y/tileSize - 0.5;
+      const ty0raw = Math.floor(fy), fracY = fy-ty0raw;
+      const ty0 = Math.max(0, Math.min(tilesY-1, ty0raw)), ty1 = Math.max(0, Math.min(tilesY-1, ty0raw+1));
+      for(let x=0;x<w;x++){
+        const fx = x/tileSize - 0.5;
+        const tx0raw = Math.floor(fx), fracX = fx-tx0raw;
+        const tx0 = Math.max(0, Math.min(tilesX-1, tx0raw)), tx1 = Math.max(0, Math.min(tilesX-1, tx0raw+1));
+        const t00=tileThresh[ty0*tilesX+tx0], t10=tileThresh[ty0*tilesX+tx1];
+        const t01=tileThresh[ty1*tilesX+tx0], t11=tileThresh[ty1*tilesX+tx1];
+        const top = t00*(1-fracX) + t10*fracX, bot = t01*(1-fracX) + t11*fracX;
+        out[y*w+x] = top*(1-fracY) + bot*fracY;
+      }
+    }
+    return out;
+  }
+
+  // Small dilate-then-erode (a "closing") to bridge the short gaps that are
+  // still left after hysteresis — a handful of pixels along an otherwise
+  // continuous contour dipping just under even the locally-adapted
+  // threshold. A small enough radius bridges gaps without visibly
+  // thickening real strokes, since dilating and eroding by the same amount
+  // mostly cancels out everywhere except in those small gaps.
+  function dilateBinary(bin, w, h, radius){
+    const out = new Uint8Array(w*h);
+    for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+      let v=0;
+      for(let dy=-radius;dy<=radius && !v;dy++){
+        const ny=y+dy; if(ny<0||ny>=h) continue;
+        for(let dx=-radius;dx<=radius;dx++){
+          const nx=x+dx; if(nx<0||nx>=w) continue;
+          if(bin[ny*w+nx]){ v=1; break; }
+        }
+      }
+      out[y*w+x]=v;
+    }
+    return out;
+  }
+  function erodeBinary(bin, w, h, radius){
+    const out = new Uint8Array(w*h);
+    for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+      let v=1;
+      for(let dy=-radius;dy<=radius && v;dy++){
+        const ny=y+dy;
+        for(let dx=-radius;dx<=radius;dx++){
+          const nx=x+dx;
+          const val = (ny<0||ny>=h||nx<0||nx>=w) ? 0 : bin[ny*w+nx];
+          if(!val){ v=0; break; }
+        }
+      }
+      out[y*w+x]=v;
+    }
+    return out;
+  }
+  function morphClose(bin, w, h, radius){
+    return erodeBinary(dilateBinary(bin, w, h, radius), w, h, radius);
   }
 
   // A finished line drawing is almost entirely near-pure black/white already
@@ -673,12 +768,14 @@
     const denoised = bilateralFilterGray(gray, w, h, 3, 3, 25);
     const { mag, dir } = sobelOnGray(denoised, w, h);
     const suppressed = nonMaxSuppress(mag, dir, w, h);
-    const highT = otsuThreshold(suppressed);
-    const edges = hysteresis(suppressed, w, h, highT*0.4, highT);
+    const tileSize = Math.max(24, Math.round(Math.min(w,h)/10));
+    const highTMap = adaptiveEdgeThreshold(suppressed, w, h, tileSize, 0.3);
+    const edges = hysteresisAdaptive(suppressed, w, h, highTMap, 0.4);
+    const closed = morphClose(edges, w, h, 2);
 
     const out = new ImageData(w, h);
     for(let p=0;p<n;p++){
-      const val = edges[p] ? 255 : 0;
+      const val = closed[p] ? 255 : 0;
       const idx = p*4;
       out.data[idx]=out.data[idx+1]=out.data[idx+2]=val;
       out.data[idx+3]=255;
