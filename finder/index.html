@@ -7,6 +7,7 @@
 <script src="stars.js"></script>
 <script src="field.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.10.0/dist/ort.js"></script>
 <style>
   :root{
     --bg:#1b1c20; --panel:#26272c; --border:#3a3b41; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe;
@@ -1107,17 +1108,30 @@
     ctx.drawImage(originalPhotoImg, 0, 0, w, h);
 
     // A genuinely new upload that isn't already a line drawing gets
-    // converted once, automatically — see buildLineDrawingFromPhoto. The
-    // result REPLACES originalPhotoImg (not just this canvas), so later
-    // invert/line-width recomputes keep working from the line drawing
-    // instead of re-drawing the raw photo underneath it every time.
+    // converted once, automatically. Tries the real pretrained model first
+    // (window.buildLineDrawingML, see the <script> block near the face
+    // landmarker) for real-drawing-quality results; if that model hasn't
+    // loaded, has no internet to fetch on first use, or errors during
+    // inference for any reason, this quietly falls back to the classical
+    // bilateral-filter/Canny pipeline (buildLineDrawingFromPhoto) instead of
+    // leaving the upload unconverted. Either way, the result REPLACES
+    // originalPhotoImg (not just this canvas), so later invert/line-width
+    // recomputes keep working from the line drawing instead of re-drawing
+    // the raw photo underneath it every time.
     if(isNewImage && looksLikePhoto(ctx.getImageData(0,0,w,h))){
       autoStatus.textContent = 'Turning your photo into a line drawing…';
-      await new Promise(r => setTimeout(r, 0)); // let the status message paint before the heavy synchronous work below
-      const lineArt = buildLineDrawingFromPhoto(ctx.getImageData(0,0,w,h));
+      await new Promise(r => setTimeout(r, 0)); // let the status message paint before the heavy work below
+      let lineArt;
+      try{
+        lineArt = await window.buildLineDrawingML(ctx.getImageData(0,0,w,h));
+      }catch(err){
+        console.warn('ML line-art conversion unavailable, using the classical pipeline instead.', err);
+        lineArt = buildLineDrawingFromPhoto(ctx.getImageData(0,0,w,h));
+      }
+      cleanBackdropCanvas.width = lineArt.width; cleanBackdropCanvas.height = lineArt.height;
       ctx.putImageData(lineArt, 0, 0);
       const converted = document.createElement('canvas');
-      converted.width = w; converted.height = h;
+      converted.width = lineArt.width; converted.height = lineArt.height;
       converted.getContext('2d').putImageData(lineArt, 0, 0);
       originalPhotoImg = converted;
     }
@@ -2790,6 +2804,92 @@
     const task = detectQueue.then(run, run);
     detectQueue = task.catch(() => {});
     return task;
+  };
+</script>
+
+<!-- Photo -> line-drawing via a real pretrained model (Informative Drawings,
+     MIT-licensed: https://github.com/carolineec/informative-drawings), not
+     just classical edge detection. Same "load a model, run it locally"
+     pattern as the face-landmark block above. If the model fails to load or
+     errors during inference (offline, slow connection on first use, no WASM
+     support, etc.), window.buildLineDrawingML rejects and the caller in the
+     main app falls back to the classical bilateral-filter/Canny pipeline —
+     every upload still produces a usable line drawing either way. -->
+<script>
+  ort.env.wasm.proxy = true; // keeps WASM inference off the main thread
+  if(self.crossOriginIsolated) ort.env.wasm.numThreads = navigator.hardwareConcurrency;
+
+  let lineArtSessionPromise = null;
+  function getLineArtSession(){
+    if(!lineArtSessionPromise){
+      lineArtSessionPromise = ort.InferenceSession.create('line-art-model.onnx', { executionProviders: ['wasm'] })
+        .catch(err => {
+          console.warn('Line-art model failed to load — photo uploads will use the classical sketch pipeline instead.', err);
+          lineArtSessionPromise = null;
+          throw err;
+        });
+    }
+    return lineArtSessionPromise;
+  }
+  // Start loading in the background as soon as the page opens, so the model
+  // is likely already warmed up by the time someone uploads a photo. Not
+  // awaited here — a failure just means the first real call below retries
+  // and falls back, same as if this warm-up had never run.
+  getLineArtSession().catch(() => {});
+
+  // Fully convolutional, so it'll happily run at any resolution — but cost
+  // scales with pixel count, and measured directly: ~2.7s at 256px, ~7.6s at
+  // 400px, ~30s at 800px (this app's usual working resolution). 30s fails
+  // "a few seconds is fine" badly, so inference always runs at a capped
+  // resolution and the result is scaled back up to match the input — same
+  // contract as the classical pipeline (same dimensions out as in).
+  const ML_MAX_DIM = 384;
+  window.buildLineDrawingML = async function(imgData){
+    const session = await getLineArtSession(); // throws -> caller falls back
+    const origW = imgData.width, origH = imgData.height;
+    const scale = Math.min(1, ML_MAX_DIM/Math.max(origW,origH));
+    const w = Math.max(1,Math.round(origW*scale)), h = Math.max(1,Math.round(origH*scale));
+
+    let d;
+    if(scale === 1){
+      d = imgData.data;
+    } else {
+      const srcCanvas = new OffscreenCanvas(origW, origH);
+      srcCanvas.getContext('2d').putImageData(imgData, 0, 0);
+      const smallCanvas = new OffscreenCanvas(w, h);
+      smallCanvas.getContext('2d').drawImage(srcCanvas, 0, 0, w, h);
+      d = smallCanvas.getContext('2d').getImageData(0, 0, w, h).data;
+    }
+
+    const n = w*h;
+    const tensorData = new Float32Array(3*n);
+    for(let i=0,p=0;i<d.length;i+=4,p++){
+      tensorData[p] = d[i]/255;         // R plane
+      tensorData[n+p] = d[i+1]/255;     // G plane
+      tensorData[2*n+p] = d[i+2]/255;   // B plane
+    }
+    const feeds = { input: new ort.Tensor('float32', tensorData, [1, 3, h, w]) };
+    const results = await session.run(feeds);
+    const out = results['output'];
+    const outW = out.dims[3], outH = out.dims[2];
+    const smallOutImg = new ImageData(outW, outH);
+    for(let p=0;p<outW*outH;p++){
+      // The model draws traditional line art (dark ink on a light page: near
+      // 1 = page, near 0 = ink) — this app's convention is the opposite
+      // (white lines on black), so invert.
+      const v = Math.max(0, Math.min(255, (1-out.data[p])*255));
+      const idx = p*4;
+      smallOutImg.data[idx]=smallOutImg.data[idx+1]=smallOutImg.data[idx+2]=v;
+      smallOutImg.data[idx+3]=255;
+    }
+    if(outW===origW && outH===origH) return smallOutImg;
+
+    const smallOutCanvas = new OffscreenCanvas(outW, outH);
+    smallOutCanvas.getContext('2d').putImageData(smallOutImg, 0, 0);
+    const fullOutCanvas = new OffscreenCanvas(origW, origH);
+    const fctx = fullOutCanvas.getContext('2d');
+    fctx.drawImage(smallOutCanvas, 0, 0, origW, origH);
+    return fctx.getImageData(0, 0, origW, origH);
   };
 </script>
 </body>
