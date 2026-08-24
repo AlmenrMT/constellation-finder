@@ -2524,8 +2524,55 @@
   const orderConstellationNo = new URLSearchParams(location.search).get('constellation');
   let orderContext = null;
 
+  async function loadOrderFromSupabase(){
+    const errEl = document.getElementById('orderLoginError');
+    errEl.style.display = 'none';
+
+    const { data: rows, error: qError } = await supabaseOrders
+      .from('constellations')
+      .select('*, orders(*, customers(*))')
+      .eq('constellation_no', orderConstellationNo)
+      .limit(1);
+    if(qError || !rows || !rows.length){
+      errEl.textContent = 'Could not find order ' + orderConstellationNo + (qError ? ': ' + qError.message : '.');
+      errEl.style.display = 'block';
+      return false;
+    }
+    const row = rows[0];
+    const order = row.orders;
+    const customer = order.customers;
+    const imagePath = row.line_drawing_path || row.original_path;
+    if(!imagePath){
+      errEl.textContent = 'This order has no sketch or original photo saved yet.';
+      errEl.style.display = 'block';
+      return false;
+    }
+
+    const { data: signed, error: signErr } = await supabaseOrders.storage.from('posters').createSignedUrl(imagePath, 3600);
+    if(signErr){ errEl.textContent = 'Could not load the image: ' + signErr.message; errEl.style.display = 'block'; return false; }
+
+    const resp = await fetch(signed.signedUrl);
+    const blob = await resp.blob();
+    const file = new File([blob], 'sketch.jpg', { type: blob.type || 'image/jpeg' });
+
+    orderContext = { rowId: row.id, orderNo: order.order_no, customerNo: customer.customer_no, email: customer.email };
+    document.getElementById('constellationName').value = row.title || '';
+    loadFile(file);
+
+    document.getElementById('orderLoginOverlay').style.display = 'none';
+    document.getElementById('saveToOrderBar').style.display = '';
+    document.getElementById('saveToOrderStatus').textContent = 'Editing order ' + order.order_no + ' for ' + customer.email + ' — generate the poster, then save.';
+    return true;
+  }
+
   if(orderConstellationNo){
-    document.getElementById('orderLoginOverlay').style.display = 'flex';
+    supabaseOrders.auth.getSession().then(({ data }) => {
+      if(data.session){
+        loadOrderFromSupabase();
+      }else{
+        document.getElementById('orderLoginOverlay').style.display = 'flex';
+      }
+    });
 
     document.getElementById('orderLoginBtn').addEventListener('click', async () => {
       const email = document.getElementById('orderLoginEmail').value.trim();
@@ -2536,40 +2583,7 @@
       const { error: authError } = await supabaseOrders.auth.signInWithPassword({ email, password });
       if(authError){ errEl.textContent = authError.message; errEl.style.display = 'block'; return; }
 
-      const { data: rows, error: qError } = await supabaseOrders
-        .from('constellations')
-        .select('*, orders(*, customers(*))')
-        .eq('constellation_no', orderConstellationNo)
-        .limit(1);
-      if(qError || !rows || !rows.length){
-        errEl.textContent = 'Could not find order ' + orderConstellationNo + (qError ? ': ' + qError.message : '.');
-        errEl.style.display = 'block';
-        return;
-      }
-      const row = rows[0];
-      const order = row.orders;
-      const customer = order.customers;
-      const imagePath = row.line_drawing_path || row.original_path;
-      if(!imagePath){
-        errEl.textContent = 'This order has no sketch or original photo saved yet.';
-        errEl.style.display = 'block';
-        return;
-      }
-
-      const { data: signed, error: signErr } = await supabaseOrders.storage.from('posters').createSignedUrl(imagePath, 3600);
-      if(signErr){ errEl.textContent = 'Could not load the image: ' + signErr.message; errEl.style.display = 'block'; return; }
-
-      const resp = await fetch(signed.signedUrl);
-      const blob = await resp.blob();
-      const file = new File([blob], 'sketch.jpg', { type: blob.type || 'image/jpeg' });
-
-      orderContext = { rowId: row.id, orderNo: order.order_no, customerNo: customer.customer_no, email: customer.email };
-      document.getElementById('constellationName').value = row.title || '';
-      loadFile(file);
-
-      document.getElementById('orderLoginOverlay').style.display = 'none';
-      document.getElementById('saveToOrderBar').style.display = '';
-      document.getElementById('saveToOrderStatus').textContent = 'Editing order ' + order.order_no + ' for ' + customer.email + ' — generate the poster, then save.';
+      await loadOrderFromSupabase();
     });
   }
 
