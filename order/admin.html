@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Poster orders — admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#151822; --panel2:#1a1d28; --border:#2a2e3a; --text:#eef0f3; --muted:#9aa0ac;
+    --accent:#6ea8fe; --accent-ink:#07101f; --good:#7fe0a7; --warn:#f5c15a; --bad:#ff8a8a;
+  }
+  *{box-sizing:border-box;}
+  body{ margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--text); }
+  .wrap{ max-width:900px; margin:0 auto; padding:32px 20px 80px; }
+  h1{ font-size:22px; margin:0 0 4px; }
+  p.lead{ color:var(--muted); font-size:13px; margin:0 0 28px; }
+
+  #loginPanel{ max-width:360px; margin:80px auto; background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:24px; }
+  #loginPanel h2{ font-size:17px; margin:0 0 16px; }
+  #loginPanel input{ width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:10px 12px; border-radius:8px; font-size:14px; margin-bottom:10px; }
+  #loginPanel button{ width:100%; background:var(--accent); color:var(--accent-ink); font-weight:700; border:none; padding:11px; border-radius:8px; cursor:pointer; font-size:14px; }
+  #loginError{ color:var(--bad); font-size:13px; margin-top:8px; display:none; }
+
+  #app{ display:none; }
+  .topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+  .topbar button{ background:var(--panel2); border:1px solid var(--border); color:var(--muted); padding:8px 14px; border-radius:8px; cursor:pointer; font-size:13px; }
+
+  .order-card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
+  .order-head{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+  .order-head .ids{ font-size:13px; color:var(--muted); }
+  .order-head .title{ font-size:17px; font-weight:700; }
+  .status-select{ background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:7px 10px; border-radius:8px; font-size:13px; }
+  .meta-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:16px; font-size:13px; }
+  .meta-grid .label{ color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.03em; margin-bottom:2px; }
+  .files{ border-top:1px solid var(--border); padding-top:14px; display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
+  .file-slot{ background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:12px; }
+  .file-slot .label{ font-size:12px; color:var(--muted); margin-bottom:8px; }
+  .file-slot a{ color:var(--accent); font-size:13px; text-decoration:none; }
+  .file-slot input[type=file]{ font-size:12px; color:var(--muted); width:100%; }
+  .file-slot .saved{ color:var(--good); font-size:12px; }
+  .empty{ color:var(--muted); text-align:center; padding:60px 0; }
+</style>
+</head>
+<body>
+
+<div id="loginPanel">
+  <h2>Admin sign in</h2>
+  <input type="email" id="loginEmail" placeholder="you@example.com" autocomplete="username">
+  <input type="password" id="loginPassword" placeholder="Password" autocomplete="current-password">
+  <button id="loginBtn">Sign in</button>
+  <div id="loginError"></div>
+</div>
+
+<div class="wrap" id="app">
+  <div class="topbar">
+    <div>
+      <h1>Poster orders</h1>
+      <p class="lead">Update order status, and attach the line drawing / viewer file / poster as you produce each one.</p>
+    </div>
+    <button id="logoutBtn">Sign out</button>
+  </div>
+  <div id="orderList"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="supabase-config.js"></script>
+<script>
+(function(){
+  const supabase = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+  const STATUSES = ['New','Awaiting Payment','Paid','In Production','Shipped','Delivered','Cancelled'];
+  const FINDER_URL = 'https://almenrmt.github.io/constellation-finder/finder/';
+  const FILE_SLOTS = [
+    { key: 'original_path', label: 'Original photo', uploadable: false },
+    { key: 'line_drawing_path', label: 'Line drawing', uploadable: true, contentType: 'image/png' },
+    { key: 'viewer_json_path', label: 'Constellation (viewer JSON)', uploadable: true, contentType: 'application/json' },
+    { key: 'poster_path', label: 'Final poster', uploadable: true, contentType: 'application/pdf' },
+  ];
+
+  const loginPanel = document.getElementById('loginPanel');
+  const app = document.getElementById('app');
+  const orderList = document.getElementById('orderList');
+
+  async function checkSession(){
+    const { data } = await supabase.auth.getSession();
+    if(data.session){ showApp(); } else { showLogin(); }
+  }
+
+  function showLogin(){ loginPanel.style.display = 'block'; app.style.display = 'none'; }
+  function showApp(){ loginPanel.style.display = 'none'; app.style.display = 'block'; loadOrders(); }
+
+  document.getElementById('loginBtn').addEventListener('click', async () => {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    const errEl = document.getElementById('loginError');
+    errEl.style.display = 'none';
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if(error){ errEl.textContent = error.message; errEl.style.display = 'block'; return; }
+    showApp();
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click', async () => {
+    await supabase.auth.signOut();
+    showLogin();
+  });
+
+  async function loadOrders(){
+    orderList.innerHTML = '<div class="empty">Loading…</div>';
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*, customers(*), constellations(*)')
+      .order('created_at', { ascending: false });
+
+    if(error){ orderList.innerHTML = '<div class="empty">Could not load orders: ' + error.message + '</div>'; return; }
+    if(!data.length){ orderList.innerHTML = '<div class="empty">No orders yet.</div>'; return; }
+
+    orderList.innerHTML = '';
+    for(const order of data){
+      orderList.appendChild(await renderOrderCard(order));
+    }
+  }
+
+  async function signedUrl(path){
+    if(!path) return null;
+    const { data } = await supabase.storage.from('posters').createSignedUrl(path, 3600);
+    return data ? data.signedUrl : null;
+  }
+
+  async function renderOrderCard(order){
+    const customer = order.customers;
+    const constellation = (order.constellations && order.constellations[0]) || {};
+    const card = document.createElement('div');
+    card.className = 'order-card';
+
+    const addr = order.shipping_address;
+    const addrText = addr ? [addr.name, addr.street, addr.city, addr.postal, addr.country].filter(Boolean).join(', ') : '—';
+
+    card.innerHTML = `
+      <div class="order-head">
+        <div>
+          <div class="title">${constellation.title || '(untitled)'}</div>
+          <div class="ids">${order.order_no} · ${customer.customer_no} · ${customer.email}</div>
+        </div>
+        <select class="status-select">
+          ${STATUSES.map(s => `<option value="${s}" ${s === order.status ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </div>
+      <div class="meta-grid">
+        <div><div class="label">Product</div>${order.product_type === 'framed' ? 'Framed poster' : 'PDF poster'} (${order.price} ${order.currency})</div>
+        <div><div class="label">Hemisphere</div>${constellation.hemisphere || '—'}</div>
+        <div><div class="label">Ordered</div>${new Date(order.created_at).toLocaleDateString()}</div>
+        <div><div class="label">Shipping address</div>${addrText}</div>
+      </div>
+      <div class="files"></div>
+    `;
+
+    card.querySelector('.status-select').addEventListener('change', async (e) => {
+      const { error } = await supabase.from('orders').update({ status: e.target.value }).eq('id', order.id);
+      if(error) alert('Could not update status: ' + error.message);
+    });
+
+    const filesEl = card.querySelector('.files');
+    for(const slot of FILE_SLOTS){
+      filesEl.appendChild(await renderFileSlot(order, constellation, slot));
+    }
+
+    return card;
+  }
+
+  async function renderFileSlot(order, constellation, slot){
+    const el = document.createElement('div');
+    el.className = 'file-slot';
+    const path = constellation[slot.key];
+    const url = await signedUrl(path);
+
+    let extraLinks = '';
+    if(slot.key === 'line_drawing_path' && path){
+      extraLinks += `<div style="margin-top:6px;"><a href="${FINDER_URL}?constellation=${encodeURIComponent(constellation.constellation_no)}" target="_blank" rel="noopener">Open in Constellation Finder →</a></div>`;
+    }
+
+    el.innerHTML = `
+      <div class="label">${slot.label}</div>
+      ${url ? `<a href="${url}" target="_blank" rel="noopener">View current file →</a>` : '<span style="color:var(--muted);font-size:12px;">Not uploaded yet</span>'}
+      ${extraLinks}
+      ${slot.uploadable ? '<div style="margin-top:8px;"><input type="file"></div><div class="saved" style="display:none;">Saved ✓</div>' : ''}
+      ${slot.key === 'poster_path' && path ? '<div style="margin-top:8px;"><button class="send-poster-btn" style="background:var(--accent);color:var(--accent-ink);font-weight:700;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:12px;">Send to customer</button></div><div class="send-status" style="font-size:12px;margin-top:6px;"></div>' : ''}
+    `;
+
+    if(slot.uploadable){
+      const fileInput = el.querySelector('input[type=file]');
+      const savedEl = el.querySelector('.saved');
+      fileInput.addEventListener('change', async () => {
+        const file = fileInput.files[0];
+        if(!file) return;
+        const ext = file.name.split('.').pop();
+        const newPath = `${order.customers.customer_no}/${order.order_no}/${slot.key.replace('_path','')}.${ext}`;
+        const { error: upErr } = await supabase.storage.from('posters').upload(newPath, file, {
+          contentType: slot.contentType, upsert: true,
+        });
+        if(upErr){ alert('Upload failed: ' + upErr.message); return; }
+        const { error: dbErr } = await supabase.from('constellations')
+          .update({ [slot.key]: newPath }).eq('id', constellation.id);
+        if(dbErr){ alert('Saved file but could not record it: ' + dbErr.message); return; }
+        savedEl.style.display = 'block';
+      });
+    }
+
+    const sendBtn = el.querySelector('.send-poster-btn');
+    if(sendBtn){
+      sendBtn.addEventListener('click', async () => {
+        const sendStatus = el.querySelector('.send-status');
+        sendBtn.disabled = true;
+        sendStatus.textContent = 'Sending…';
+        sendStatus.style.color = 'var(--muted)';
+        try{
+          const { data, error } = await supabase.functions.invoke('send-poster-email', {
+            body: { order_no: order.order_no },
+          });
+          if(error) throw error;
+          sendStatus.textContent = 'Sent to ' + order.customers.email + '.';
+          sendStatus.style.color = 'var(--good)';
+        }catch(err){
+          sendStatus.textContent = 'Could not send: ' + (err.message || err);
+          sendStatus.style.color = 'var(--bad)';
+        }finally{
+          sendBtn.disabled = false;
+        }
+      });
+    }
+
+    return el;
+  }
+
+  checkSession();
+})();
+</script>
+</body>
+</html>

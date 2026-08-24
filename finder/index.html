@@ -7,6 +7,9 @@
 <script src="stars.js"></script>
 <script src="field.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="supabase-config.js"></script>
 <style>
   :root{
     --bg:#1b1c20; --panel:#26272c; --border:#3a3b41; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe;
@@ -59,6 +62,17 @@
 </style>
 </head>
 <body>
+
+<div id="orderLoginOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px;max-width:320px;width:90%;">
+    <h2 style="font-size:16px;margin:0 0 14px;">Admin sign in</h2>
+    <p style="font-size:12px;color:var(--muted);margin:0 0 14px;">Loading a sketch from an order requires your admin login.</p>
+    <input type="email" id="orderLoginEmail" placeholder="you@example.com" style="width:100%;background:#1a1d24;border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:8px;font-size:14px;margin-bottom:8px;box-sizing:border-box;">
+    <input type="password" id="orderLoginPassword" placeholder="Password" style="width:100%;background:#1a1d24;border:1px solid var(--border);color:var(--text);padding:9px 11px;border-radius:8px;font-size:14px;margin-bottom:8px;box-sizing:border-box;">
+    <button id="orderLoginBtn" style="width:100%;background:var(--accent);color:#07101f;font-weight:700;border:none;padding:10px;border-radius:8px;cursor:pointer;font-size:14px;">Sign in &amp; load order</button>
+    <div id="orderLoginError" style="display:none;color:#ff8a8a;font-size:12px;margin-top:8px;"></div>
+  </div>
+</div>
 
 <header>
   <h1>Point Pattern → Real Sky Constellation Finder</h1>
@@ -169,6 +183,10 @@
       <button class="primary" id="posterDownloadPngBtn" disabled>Download poster PNG</button>
       <button id="posterDownloadSvgBtn" disabled>Download poster SVG</button>
     </div>
+    <div class="btnrow" id="saveToOrderBar" style="display:none;">
+      <button class="primary" id="saveToOrderBtn">Save poster + constellation to order</button>
+    </div>
+    <div class="stats" id="saveToOrderStatus"></div>
   </div>
   <div class="stage" style="grid-template-columns:1fr;">
     <div class="card">
@@ -2497,6 +2515,114 @@
       a.click();
       URL.revokeObjectURL(a.href);
     });
+  });
+
+  // ---------- order integration: open with ?constellation=K1234 to load a
+  // saved sketch straight from an order, and to save the finished poster +
+  // viewer JSON back onto that same order. Only reachable from admin.html. ----------
+  const supabaseOrders = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+  const orderConstellationNo = new URLSearchParams(location.search).get('constellation');
+  let orderContext = null;
+
+  if(orderConstellationNo){
+    document.getElementById('orderLoginOverlay').style.display = 'flex';
+
+    document.getElementById('orderLoginBtn').addEventListener('click', async () => {
+      const email = document.getElementById('orderLoginEmail').value.trim();
+      const password = document.getElementById('orderLoginPassword').value;
+      const errEl = document.getElementById('orderLoginError');
+      errEl.style.display = 'none';
+
+      const { error: authError } = await supabaseOrders.auth.signInWithPassword({ email, password });
+      if(authError){ errEl.textContent = authError.message; errEl.style.display = 'block'; return; }
+
+      const { data: rows, error: qError } = await supabaseOrders
+        .from('constellations')
+        .select('*, orders(*, customers(*))')
+        .eq('constellation_no', orderConstellationNo)
+        .limit(1);
+      if(qError || !rows || !rows.length){
+        errEl.textContent = 'Could not find order ' + orderConstellationNo + (qError ? ': ' + qError.message : '.');
+        errEl.style.display = 'block';
+        return;
+      }
+      const row = rows[0];
+      const order = row.orders;
+      const customer = order.customers;
+      const imagePath = row.line_drawing_path || row.original_path;
+      if(!imagePath){
+        errEl.textContent = 'This order has no sketch or original photo saved yet.';
+        errEl.style.display = 'block';
+        return;
+      }
+
+      const { data: signed, error: signErr } = await supabaseOrders.storage.from('posters').createSignedUrl(imagePath, 3600);
+      if(signErr){ errEl.textContent = 'Could not load the image: ' + signErr.message; errEl.style.display = 'block'; return; }
+
+      const resp = await fetch(signed.signedUrl);
+      const blob = await resp.blob();
+      const file = new File([blob], 'sketch.jpg', { type: blob.type || 'image/jpeg' });
+
+      orderContext = { rowId: row.id, orderNo: order.order_no, customerNo: customer.customer_no, email: customer.email };
+      document.getElementById('constellationName').value = row.title || '';
+      loadFile(file);
+
+      document.getElementById('orderLoginOverlay').style.display = 'none';
+      document.getElementById('saveToOrderBar').style.display = '';
+      document.getElementById('saveToOrderStatus').textContent = 'Editing order ' + order.order_no + ' for ' + customer.email + ' — generate the poster, then save.';
+    });
+  }
+
+  document.getElementById('saveToOrderBtn').addEventListener('click', async () => {
+    if(!orderContext) return;
+    const statusEl = document.getElementById('saveToOrderStatus');
+    if(!lastPosterLayers || !lastMatchData){
+      statusEl.textContent = 'Generate the poster first.';
+      return;
+    }
+    const btn = document.getElementById('saveToOrderBtn');
+    btn.disabled = true;
+    statusEl.textContent = 'Saving…';
+    try{
+      const { before, after, drawingCanvas, drawingOpacity } = lastPosterLayers;
+      const [beforeImg, afterImg] = await Promise.all([svgStringToImage(before), svgStringToImage(after)]);
+      const c = document.createElement('canvas');
+      c.width = 1000; c.height = 1400;
+      const cx = c.getContext('2d');
+      cx.drawImage(beforeImg, 0, 0, 1000, 1400);
+      if(drawingCanvas){
+        cx.globalAlpha = drawingOpacity;
+        cx.drawImage(drawingCanvas, 0, 0, 1000, 1400);
+        cx.globalAlpha = 1;
+      }
+      cx.drawImage(afterImg, 0, 0, 1000, 1400);
+
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({ unit: 'px', format: [1000, 1400] });
+      pdf.addImage(c, 'PNG', 0, 0, 1000, 1400);
+      const pdfBlob = pdf.output('blob');
+
+      const base = orderContext.customerNo + '/' + orderContext.orderNo + '/';
+      const { error: posterErr } = await supabaseOrders.storage.from('posters')
+        .upload(base + 'poster.pdf', pdfBlob, { contentType: 'application/pdf', upsert: true });
+      if(posterErr) throw posterErr;
+
+      const jsonBlob = new Blob([JSON.stringify(lastMatchData, null, 2)], { type: 'application/json' });
+      const { error: jsonErr } = await supabaseOrders.storage.from('posters')
+        .upload(base + 'constellation.json', jsonBlob, { contentType: 'application/json', upsert: true });
+      if(jsonErr) throw jsonErr;
+
+      const { error: dbErr } = await supabaseOrders.from('constellations')
+        .update({ poster_path: base + 'poster.pdf', viewer_json_path: base + 'constellation.json' })
+        .eq('id', orderContext.rowId);
+      if(dbErr) throw dbErr;
+
+      statusEl.textContent = 'Saved poster + constellation to order ' + orderContext.orderNo + '.';
+    }catch(err){
+      statusEl.textContent = 'Could not save: ' + (err.message || err);
+    }finally{
+      btn.disabled = false;
+    }
   });
 
 })();
