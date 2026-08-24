@@ -218,18 +218,21 @@
         sendStatus.textContent = 'Sending…';
         sendStatus.style.color = 'var(--muted)';
         try{
-          const { data, error } = await supabase.functions.invoke('send-poster-email', {
-            body: { order_no: order.order_no },
+          const { data: sessionData } = await supabase.auth.getSession();
+          const resp = await fetch(window.SUPABASE_URL + '/functions/v1/send-poster-email', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + sessionData.session.access_token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ order_no: order.order_no }),
           });
-          if(error) throw error;
+          const result = await resp.json();
+          if(!resp.ok || !result.ok) throw new Error(result.error || ('HTTP ' + resp.status));
           sendStatus.textContent = 'Sent to ' + order.customers.email + '.';
           sendStatus.style.color = 'var(--good)';
         }catch(err){
-          let detail = err.message || String(err);
-          if(err.context && typeof err.context.json === 'function'){
-            try{ const body = await err.context.json(); if(body && body.error) detail = body.error; }catch(_){}
-          }
-          sendStatus.textContent = 'Could not send: ' + detail;
+          sendStatus.textContent = 'Could not send: ' + (err.message || err);
           sendStatus.style.color = 'var(--bad)';
         }finally{
           sendBtn.disabled = false;
