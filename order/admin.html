@@ -202,6 +202,11 @@
           .update({ [slot.key]: newPath }).eq('id', constellation.id);
         if(dbErr){ alert('Saved file but could not record it: ' + dbErr.message); return; }
         savedEl.style.display = 'block';
+
+        if(slot.key === 'line_drawing_path'){
+          savedEl.textContent = 'Saved — auto-generating poster…';
+          triggerAutoGenerate(constellation.constellation_no, savedEl);
+        }
       });
     }
 
@@ -229,6 +234,37 @@
     }
 
     return el;
+  }
+
+  // Runs constellation-finder headlessly in a hidden iframe to match the
+  // sketch against the sky and save the poster + viewer JSON, using whatever
+  // default settings are currently set there (constellation size, opacity) —
+  // no manual "Open in Constellation Finder" step needed for the common case.
+  function triggerAutoGenerate(constellationNo, statusEl){
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = FINDER_URL + '?constellation=' + encodeURIComponent(constellationNo) + '&auto=1';
+
+    const timeout = setTimeout(() => {
+      window.removeEventListener('message', onMessage);
+      iframe.remove();
+      statusEl.textContent = 'Auto-generate is taking a while — check back, or open in Constellation Finder manually.';
+    }, 30000);
+
+    function onMessage(e){
+      if(!e.data || e.data.source !== 'constellation-finder-auto') return;
+      clearTimeout(timeout);
+      window.removeEventListener('message', onMessage);
+      iframe.remove();
+      if(e.data.ok){
+        statusEl.textContent = 'Poster auto-generated ✓';
+        loadOrders();
+      }else{
+        statusEl.textContent = 'Auto-generate failed (' + (e.data.error || 'unknown error') + ') — open in Constellation Finder manually.';
+      }
+    }
+    window.addEventListener('message', onMessage);
+    document.body.appendChild(iframe);
   }
 
   checkSession();

@@ -91,11 +91,7 @@
     </div>
     <input type="file" id="fileInput" accept="image/*">
 
-    <label class="row" style="align-items:center; gap:6px; margin-top:14px;">
-      <input type="checkbox" id="invertToggle" style="width:auto;">
-      <span style="font-size:12px; color:var(--text);">Invert colors</span>
-    </label>
-    <label>Line width — thinner ← 0 → thicker <span class="val" id="lineWidthVal">0</span></label>
+    <label style="margin-top:14px;">Line width — thinner ← 0 → thicker <span class="val" id="lineWidthVal">0</span></label>
     <input type="range" id="lineWidthSlider" min="-3" max="3" step="0.01" value="0">
 
     <label>Light-intensity weight <span class="val" id="weightVal"></span></label>
@@ -109,7 +105,7 @@
     </div>
 
     <label>Constellation opacity <span class="val" id="constOpacityVal"></span></label>
-    <input type="range" id="constOpacity" min="0" max="1" step="0.05" value="1">
+    <input type="range" id="constOpacity" min="0" max="1" step="0.05" value="0.7">
 
     <div class="btnrow">
       <button id="downloadSvg">Download chart SVG</button>
@@ -173,8 +169,8 @@
       constellation's unique ID in the viewer — publish it there first (see "Publish in Viewer")
       so scanning it actually resolves to something.
     </p>
-    <label>Constellation size <span class="val" id="posterZoomVal">1.0×</span></label>
-    <input type="range" id="posterZoom" min="0.4" max="3" step="0.05" value="1">
+    <label>Constellation size <span class="val" id="posterZoomVal">1.25×</span></label>
+    <input type="range" id="posterZoom" min="0.4" max="3" step="0.05" value="1.25">
     <div class="btnrow">
       <button class="primary" id="posterGenBtn">Generate</button>
     </div>
@@ -326,6 +322,23 @@
   // originalPhotoImg can be an <img> (a real upload) or a <canvas> (the
   // sample pattern, or a sketch-filtered result) — recomputeActiveImage()
   // only ever needs .width/.height + drawImage, which both provide.
+  // A finished line drawing is expected as light lines on a dark background
+  // (the app's own convention) — but sketches often arrive as dark lines on
+  // white paper/canvas instead. Sampling average brightness on a small
+  // downscaled copy is enough to tell which one we've got, so the manual
+  // "Invert colors" toggle isn't needed: this replaces it entirely.
+  function isLightBackground(img){
+    const n = 64;
+    const c = document.createElement('canvas');
+    c.width = n; c.height = n;
+    const cx = c.getContext('2d');
+    cx.drawImage(img, 0, 0, n, n);
+    const { data } = cx.getImageData(0, 0, n, n);
+    let sum = 0;
+    for(let i = 0; i < data.length; i += 4) sum += 0.299*data[i] + 0.587*data[i+1] + 0.114*data[i+2];
+    return (sum / (data.length/4)) > 127.5;
+  }
+
   function loadFile(file){
     if(!file || !file.type.startsWith('image/')) return;
     lastLoadedFileName = stripExtension(file.name);
@@ -333,8 +346,7 @@
     const img = new Image();
     img.onload = () => {
       originalPhotoImg = img;
-      invertOn = false; lineWidthValue = 0;
-      document.getElementById('invertToggle').checked = false;
+      invertOn = isLightBackground(img); lineWidthValue = 0;
       document.getElementById('lineWidthSlider').value = 0;
       document.getElementById('lineWidthVal').textContent = '0';
       recomputeActiveImage(true);
@@ -359,7 +371,6 @@
   document.getElementById('sampleBtn').addEventListener('click', () => {
     lastLoadedFileName = 'Constellation';
     invertOn = false; lineWidthValue = 0;
-    document.getElementById('invertToggle').checked = false;
     document.getElementById('lineWidthSlider').value = 0;
     document.getElementById('lineWidthVal').textContent = '0';
     const w = 300, h = 460;
@@ -913,11 +924,6 @@
     }
     compositeDotsAndProcess();
   }
-
-  document.getElementById('invertToggle').addEventListener('change', e => {
-    invertOn = e.target.checked;
-    recomputeActiveImage(false);
-  });
 
   let lineWidthTimer = null;
   document.getElementById('lineWidthSlider').addEventListener('input', e => {
@@ -1705,7 +1711,7 @@
       markSvg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${(r+3).toFixed(1)}" fill="${below?pal.dimStar:'#ffd76a'}" opacity="0.18"/>`;
       markSvg += `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r.toFixed(1)}" fill="${below?pal.dimStar:'#fffbe8'}" stroke="${below?pal.dimStar:'#ffd76a'}" stroke-width="1"/>`;
       if(showNames){
-        markSvg += `<text x="${p.x.toFixed(1)}" y="${(p.y-r-5).toFixed(1)}" fill="${below?pal.dimLabel:'#ffe9a8'}" font-size="12" text-anchor="middle" font-family="-apple-system,sans-serif" font-weight="600">${s.name}${below?' (below horizon)':''}</text>`;
+        markSvg += `<text x="${p.x.toFixed(1)}" y="${(p.y-r-5).toFixed(1)}" fill="${below?pal.dimLabel:'#ffe9a8'}" font-size="12" text-anchor="middle" font-family="-apple-system,sans-serif" font-weight="600">${s.name}</text>`;
       }
     });
 
@@ -1810,7 +1816,7 @@
     return `<rect x="0" y="${(baseline-16).toFixed(1)}" width="${W}" height="18" fill="#000000"/>` + shapes;
   }
 
-  function buildPosterSvg(match, mstEdges, drawingLayer, title, mapUrl, bg, zoomFactor){
+  function buildPosterSvg(match, mstEdges, drawingLayer, title, mapUrl, bg, zoomFactor, drawingOpacityOverride){
     zoomFactor = zoomFactor || 1;
     // Always a real night sky, regardless of the source image's own background
     // color (a poster isn't a diagram — it should look like looking up at night).
@@ -1881,7 +1887,7 @@
     // ---- the source drawing, mesh-warped the same way as the live finder chart ----
     let drawingSvg = '';
     let drawingCanvas = null;
-    const drawingOpacity = 0.85;
+    const drawingOpacity = drawingOpacityOverride == null ? 0.85 : drawingOpacityOverride;
     if(drawingLayer && drawingLayer.img){
       function mapPoint(x,y){
         const tgt = { x, y: -y };
@@ -2443,13 +2449,14 @@
     const rawTitle = document.getElementById('constellationName').value.trim() || 'Constellation';
     const title = escapeXml(rawTitle);
     const zoomFactor = parseFloat(document.getElementById('posterZoom').value) || 1;
+    const constOpacity = parseFloat(document.getElementById('constOpacity').value);
 
     // Links to this constellation's stable, unique ID — not a name-derived
     // slug — so it keeps resolving even if the name is edited or duplicated
     // elsewhere, as long as it's been published (see "Publish in Viewer").
     const mapUrl = VIEWER_BASE_URL + '?map=' + encodeURIComponent('../maps/' + (constellationId||'constellation') + '.json');
 
-    lastPosterLayers = buildPosterSvg(lastBestMatch, lastMstEdges, lastDrawingLayer, title, mapUrl, lastBgColor, zoomFactor);
+    lastPosterLayers = buildPosterSvg(lastBestMatch, lastMstEdges, lastDrawingLayer, title, mapUrl, lastBgColor, zoomFactor, constOpacity);
     lastPosterSvg = lastPosterLayers.full;
     document.getElementById('posterPreviewWrap').style.display = '';
     document.getElementById('posterPreviewHolder').innerHTML = lastPosterSvg;
@@ -2565,10 +2572,66 @@
     return true;
   }
 
+  // Resolves once the automatic detect+match pipeline (scheduleProcess/process,
+  // both fire-and-forget by design for the normal manual UI) has actually
+  // produced a match, or false on timeout — used only by the auto-generate flow.
+  function waitForMatch(timeoutMs){
+    return new Promise(resolve => {
+      const start = Date.now();
+      (function check(){
+        if(lastBestMatch){ resolve(true); return; }
+        if(Date.now() - start > timeoutMs){ resolve(false); return; }
+        setTimeout(check, 200);
+      })();
+    });
+  }
+
+  async function saveToOrder(){
+    if(!orderContext) throw new Error('No order loaded');
+    if(!lastPosterLayers || !lastMatchData) throw new Error('Generate the poster first.');
+
+    const { before, after, drawingCanvas, drawingOpacity } = lastPosterLayers;
+    const [beforeImg, afterImg] = await Promise.all([svgStringToImage(before), svgStringToImage(after)]);
+    const c = document.createElement('canvas');
+    c.width = 1000; c.height = 1400;
+    const cx = c.getContext('2d');
+    cx.drawImage(beforeImg, 0, 0, 1000, 1400);
+    if(drawingCanvas){
+      cx.globalAlpha = drawingOpacity;
+      cx.drawImage(drawingCanvas, 0, 0, 1000, 1400);
+      cx.globalAlpha = 1;
+    }
+    cx.drawImage(afterImg, 0, 0, 1000, 1400);
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({ unit: 'px', format: [1000, 1400] });
+    pdf.addImage(c, 'PNG', 0, 0, 1000, 1400);
+    const pdfBlob = pdf.output('blob');
+
+    const base = orderContext.customerNo + '/' + orderContext.orderNo + '/';
+    const { error: posterErr } = await supabaseOrders.storage.from('posters')
+      .upload(base + 'poster.pdf', pdfBlob, { contentType: 'application/pdf', upsert: true });
+    if(posterErr) throw posterErr;
+
+    const jsonBlob = new Blob([JSON.stringify(lastMatchData, null, 2)], { type: 'application/json' });
+    const { error: jsonErr } = await supabaseOrders.storage.from('posters')
+      .upload(base + 'constellation.json', jsonBlob, { contentType: 'application/json', upsert: true });
+    if(jsonErr) throw jsonErr;
+
+    const { error: dbErr } = await supabaseOrders.from('constellations')
+      .update({ poster_path: base + 'poster.pdf', viewer_json_path: base + 'constellation.json' })
+      .eq('id', orderContext.rowId);
+    if(dbErr) throw dbErr;
+  }
+
+  const autoGenerate = new URLSearchParams(location.search).get('auto') === '1';
+  const inIframe = window.parent !== window;
+
   if(orderConstellationNo){
-    supabaseOrders.auth.getSession().then(({ data }) => {
+    supabaseOrders.auth.getSession().then(async ({ data }) => {
       if(data.session){
-        loadOrderFromSupabase();
+        const ok = await loadOrderFromSupabase();
+        if(ok && autoGenerate) runAutoGenerate();
       }else{
         document.getElementById('orderLoginOverlay').style.display = 'flex';
       }
@@ -2583,57 +2646,51 @@
       const { error: authError } = await supabaseOrders.auth.signInWithPassword({ email, password });
       if(authError){ errEl.textContent = authError.message; errEl.style.display = 'block'; return; }
 
-      await loadOrderFromSupabase();
+      const ok = await loadOrderFromSupabase();
+      if(ok && autoGenerate) runAutoGenerate();
     });
   }
 
-  document.getElementById('saveToOrderBtn').addEventListener('click', async () => {
-    if(!orderContext) return;
+  // Triggered only when opened as ?constellation=K...&auto=1 (admin.html does
+  // this in a hidden iframe right after a sketch upload) — matching already
+  // runs automatically once the image loads, so this just waits for it, then
+  // generates and saves the poster using whatever the current default
+  // settings are (constellation size, opacity), with zero further clicks.
+  async function runAutoGenerate(){
     const statusEl = document.getElementById('saveToOrderStatus');
-    if(!lastPosterLayers || !lastMatchData){
-      statusEl.textContent = 'Generate the poster first.';
+    statusEl.textContent = 'Auto-generating — matching against the sky…';
+    const matched = await waitForMatch(20000);
+    if(!matched){
+      statusEl.textContent = 'Auto-generate timed out waiting for a sky match — open this order normally to check it.';
+      notifyParent(false, 'Timed out waiting for a match');
       return;
     }
+    try{
+      generatePoster();
+      await saveToOrder();
+      statusEl.textContent = 'Auto-generated and saved poster + constellation to order ' + orderContext.orderNo + '.';
+      notifyParent(true);
+    }catch(err){
+      statusEl.textContent = 'Auto-generate failed: ' + (err.message || err);
+      notifyParent(false, err.message || String(err));
+    }
+  }
+
+  function notifyParent(ok, error){
+    if(!inIframe) return;
+    window.parent.postMessage({ source: 'constellation-finder-auto', ok, error, orderNo: orderContext && orderContext.orderNo }, '*');
+  }
+
+  document.getElementById('saveToOrderBtn').addEventListener('click', async () => {
+    const statusEl = document.getElementById('saveToOrderStatus');
     const btn = document.getElementById('saveToOrderBtn');
     btn.disabled = true;
     statusEl.textContent = 'Saving…';
     try{
-      const { before, after, drawingCanvas, drawingOpacity } = lastPosterLayers;
-      const [beforeImg, afterImg] = await Promise.all([svgStringToImage(before), svgStringToImage(after)]);
-      const c = document.createElement('canvas');
-      c.width = 1000; c.height = 1400;
-      const cx = c.getContext('2d');
-      cx.drawImage(beforeImg, 0, 0, 1000, 1400);
-      if(drawingCanvas){
-        cx.globalAlpha = drawingOpacity;
-        cx.drawImage(drawingCanvas, 0, 0, 1000, 1400);
-        cx.globalAlpha = 1;
-      }
-      cx.drawImage(afterImg, 0, 0, 1000, 1400);
-
-      const { jsPDF } = window.jspdf;
-      const pdf = new jsPDF({ unit: 'px', format: [1000, 1400] });
-      pdf.addImage(c, 'PNG', 0, 0, 1000, 1400);
-      const pdfBlob = pdf.output('blob');
-
-      const base = orderContext.customerNo + '/' + orderContext.orderNo + '/';
-      const { error: posterErr } = await supabaseOrders.storage.from('posters')
-        .upload(base + 'poster.pdf', pdfBlob, { contentType: 'application/pdf', upsert: true });
-      if(posterErr) throw posterErr;
-
-      const jsonBlob = new Blob([JSON.stringify(lastMatchData, null, 2)], { type: 'application/json' });
-      const { error: jsonErr } = await supabaseOrders.storage.from('posters')
-        .upload(base + 'constellation.json', jsonBlob, { contentType: 'application/json', upsert: true });
-      if(jsonErr) throw jsonErr;
-
-      const { error: dbErr } = await supabaseOrders.from('constellations')
-        .update({ poster_path: base + 'poster.pdf', viewer_json_path: base + 'constellation.json' })
-        .eq('id', orderContext.rowId);
-      if(dbErr) throw dbErr;
-
+      await saveToOrder();
       statusEl.textContent = 'Saved poster + constellation to order ' + orderContext.orderNo + '.';
     }catch(err){
-      statusEl.textContent = 'Could not save: ' + (err.message || err);
+      statusEl.textContent = (err && err.message === 'No order loaded') ? '' : 'Could not save: ' + (err.message || err);
     }finally{
       btn.disabled = false;
     }
