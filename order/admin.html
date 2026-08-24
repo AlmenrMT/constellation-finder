@@ -225,7 +225,11 @@
           sendStatus.textContent = 'Sent to ' + order.customers.email + '.';
           sendStatus.style.color = 'var(--good)';
         }catch(err){
-          sendStatus.textContent = 'Could not send: ' + (err.message || err);
+          let detail = err.message || String(err);
+          if(err.context && typeof err.context.json === 'function'){
+            try{ const body = await err.context.json(); if(body && body.error) detail = body.error; }catch(_){}
+          }
+          sendStatus.textContent = 'Could not send: ' + detail;
           sendStatus.style.color = 'var(--bad)';
         }finally{
           sendBtn.disabled = false;
