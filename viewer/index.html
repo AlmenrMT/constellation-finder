@@ -204,9 +204,17 @@
   <div id="infoPanel">
     <div class="closeRow"><button id="closeInfoBtn">Close ✕</button></div>
     <h1 id="infoTitle" style="font-size:20px; margin:0 0 4px;">—</h1>
-    <p id="infoSub" class="hint" style="margin:0 0 20px;">—</p>
+    <p id="infoSub" class="hint" style="margin:0 0 16px;">—</p>
 
-    <h2>Best time to view</h2>
+    <canvas id="skyMapCanvas" style="width:100%; aspect-ratio:1; background:#000; border-radius:10px; touch-action:none; display:block;"></canvas>
+    <div class="hint" id="skyMapLegend" style="margin-top:8px;">
+      <span style="color:#ffe9a8;">●</span> portrait stars &nbsp;
+      <span style="color:#dfe8ff;">●</span> other named stars &nbsp;
+      <span style="color:#6ea8fe;">✛</span> deep-sky objects
+    </div>
+    <p class="hint" style="margin-top:6px;">Drag to pan, pinch or scroll to zoom — stays near the constellation.</p>
+
+    <h2 style="margin-top:24px;">Best time to view</h2>
     <p class="hint">Finds the next week's darkest, highest-in-the-sky windows for this constellation, and checks the cloud forecast for each.</p>
     <button id="findBestTimeBtn" style="width:100%;">🔭 Find best time to view</button>
     <div id="bestTimeResults"></div>
@@ -221,15 +229,6 @@
 
     <h2 style="margin-top:24px;">Further out: galaxies, nebulae, clusters</h2>
     <div class="starList" id="infoDso"></div>
-
-    <h2 style="margin-top:24px;">Sky map</h2>
-    <p class="hint">Drag to pan, pinch or scroll to zoom — stays near the constellation.</p>
-    <canvas id="skyMapCanvas" style="width:100%; aspect-ratio:1; background:#000; border-radius:10px; touch-action:none; display:block;"></canvas>
-    <div class="hint" id="skyMapLegend" style="margin-top:8px;">
-      <span style="color:#ffe9a8;">●</span> portrait stars &nbsp;
-      <span style="color:#dfe8ff;">●</span> other named stars &nbsp;
-      <span style="color:#6ea8fe;">✛</span> deep-sky objects
-    </div>
   </div>
 </div>
 
