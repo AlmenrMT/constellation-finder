@@ -7,6 +7,7 @@
 <script src="starinfo.js"></script>
 <script src="dsoinfo.js"></script>
 <script src="constellationart.js"></script>
+<script src="constellationlines.js"></script>
 <style>
   :root{
     --bg:#0b0d12; --panel:#1a1d24; --border:#333844; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe; --good:#5ee08a; --warn:#ffb04a;
@@ -210,7 +211,8 @@
     <div class="hint" id="skyMapLegend" style="margin-top:8px;">
       <span style="color:#ffe9a8;">●</span> portrait stars &nbsp;
       <span style="color:#dfe8ff;">●</span> other named stars &nbsp;
-      <span style="color:#6ea8fe;">✛</span> deep-sky objects
+      <span style="color:#6ea8fe;">✛</span> deep-sky objects &nbsp;
+      <span style="color:#b4a0ff;">┈</span> official constellation outline
     </div>
     <p class="hint" style="margin-top:6px;">Drag to pan, pinch or scroll to zoom — stays near the constellation.</p>
 
@@ -519,13 +521,19 @@
       .filter(d => d.ra != null && d.dec != null)
       .map(d => ({ ...d, g: gnomonic(d.ra, d.dec, centerRa, centerDec) }))
       .filter(d => d.g);
+    // Traditional asterism outline(s) for whichever official constellation(s)
+    // this portrait's stars fall in — projected the same way as everything
+    // else here, so they line up with the real stars, not drawn as static art.
+    const asterismLines = cons.flatMap(c => (window.CONSTELLATION_LINES && window.CONSTELLATION_LINES[c]) || [])
+      .map(line => line.map(([ra,dec]) => gnomonic(ra, dec, centerRa, centerDec)).filter(Boolean))
+      .filter(line => line.length >= 2);
 
     const portraitExtents = portraitPts.filter(p => p.g).map(p => Math.hypot(p.g.x, p.g.y));
     const maxExtent = Math.max(0.02, ...(portraitExtents.length ? portraitExtents : [0.02]));
     const canvasSize = Math.min(skyMapCanvas.width, skyMapCanvas.height);
     const baseScale = (canvasSize * 0.35) / maxExtent;
 
-    skyMapState = { baseScale, scale: baseScale, offsetX: 0, offsetY: 0, portraitPts, fieldPts, dsoPts };
+    skyMapState = { baseScale, scale: baseScale, offsetX: 0, offsetY: 0, portraitPts, fieldPts, dsoPts, asterismLines };
     renderSkyMap();
   }
 
@@ -559,6 +567,22 @@
       skyMapCtx.beginPath(); skyMapCtx.arc(p.x,p.y,r,0,7); skyMapCtx.fillStyle='#dfe8ff'; skyMapCtx.fill();
       skyMapCtx.fillStyle='rgba(223,232,255,0.85)'; skyMapCtx.fillText(f.name, p.x+r+3, p.y+4);
     }
+
+    skyMapCtx.save();
+    skyMapCtx.strokeStyle = 'rgba(180,160,255,0.55)';
+    skyMapCtx.lineWidth = 1.1;
+    skyMapCtx.setLineDash([1, 5]);
+    skyMapCtx.lineCap = 'round';
+    skyMapCtx.shadowColor = 'rgba(180,160,255,0.9)';
+    skyMapCtx.shadowBlur = 4;
+    for(const line of s.asterismLines){
+      const pts = line.map(g => gnomonicToPixel(g, s, W, H));
+      if(pts.every(p => !onScreen(p))) continue;
+      skyMapCtx.beginPath();
+      pts.forEach((p,i) => i===0 ? skyMapCtx.moveTo(p.x,p.y) : skyMapCtx.lineTo(p.x,p.y));
+      skyMapCtx.stroke();
+    }
+    skyMapCtx.restore();
 
     skyMapCtx.strokeStyle = '#ffd76a'; skyMapCtx.lineWidth = 1.4;
     for(const [a,b] of (map.edges||[])){
