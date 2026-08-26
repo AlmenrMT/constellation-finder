@@ -5,6 +5,7 @@
 <title>Constellation Finder — AR Viewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <script src="starinfo.js"></script>
+<script src="dsoinfo.js"></script>
 <style>
   :root{
     --bg:#0b0d12; --panel:#1a1d24; --border:#333844; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe; --good:#5ee08a; --warn:#ffb04a;
@@ -45,19 +46,26 @@
 
   /* ---- summary screen ---- */
   #summaryScreen{ display:none; }
-  #summaryScreen .starList{ text-align:left; font-size:13px; color:var(--muted); max-height:46vh; overflow-y:auto; margin-top:6px; }
-  #summaryScreen .starEntry{ padding:8px 0; border-bottom:1px solid var(--border); line-height:1.5; }
-  #summaryScreen .starEntry b{ color:var(--text); font-size:14px; }
-  #summaryScreen .starEntry .starMeta{ font-size:12px; }
+
+  /* ---- shared star-list styling (summary screen intro + info panel) ---- */
+  .starList{ text-align:left; font-size:13px; color:var(--muted); margin-top:6px; }
+  .starEntry{ padding:8px 0; border-bottom:1px solid var(--border); line-height:1.5; }
+  .starEntry b{ color:var(--text); font-size:14px; }
+  .starEntry .starMeta{ font-size:12px; }
+
+  /* ---- info panel ---- */
+  #infoPanel{
+    position:absolute; inset:0; background:rgba(10,12,16,0.97); z-index:20; display:none; overflow-y:auto;
+    padding:16px 16px calc(16px + env(safe-area-inset-bottom)) 16px; padding-top:calc(16px + env(safe-area-inset-top));
+  }
+  #infoPanel h2{ font-size:16px; margin:0 0 10px; }
 
   /* ---- AR screen ---- */
   #arScreen{ position:fixed; inset:0; display:none; background:#000; }
   #camVideo{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
   #arCanvas{ position:absolute; inset:0; width:100%; height:100%; }
-  #noCamNote{
-    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--muted);
-    font-size:13px; padding:40px; text-align:center; pointer-events:none;
-  }
+  #noCamNote{ color:var(--muted); font-size:12px; text-align:center; }
+  #noCamNote:empty{ display:none; }
 
   #topBar{
     position:absolute; top:0; left:0; right:0; padding:10px 12px calc(10px + env(safe-area-inset-top)) 12px;
@@ -67,7 +75,7 @@
   }
   #topBar .title{ font-size:13px; font-weight:700; }
   #topBar .sub{ font-size:11px; color:var(--muted); margin-top:2px; }
-  #gearBtn{ padding:8px 10px; font-size:16px; line-height:1; }
+  #gearBtn, #infoBtn{ padding:8px 10px; font-size:16px; line-height:1; }
 
   #guidePanel{
     position:absolute; left:0; right:0; bottom:0; padding:14px 14px calc(14px + env(safe-area-inset-bottom)) 14px;
@@ -124,10 +132,10 @@
   <div class="card">
     <h1 id="summaryTitle">Constellation loaded</h1>
     <p id="summarySub"></p>
-    <div class="starList" id="summaryStars"></div>
     <div style="margin-top:16px;">
       <button class="primary" id="startBtn" style="width:100%;">Start finding it →</button>
     </div>
+    <div class="hint">Star facts, nearby deep-sky objects, and the best time to view are all in the ⓘ info panel once you're in.</div>
     <div class="hint" id="permStatus"></div>
   </div>
 </div>
@@ -135,14 +143,16 @@
 <div id="arScreen">
   <video id="camVideo" autoplay playsinline muted></video>
   <canvas id="arCanvas"></canvas>
-  <div id="noCamNote"></div>
 
   <div id="topBar">
     <div>
       <div class="title" id="targetTitle">—</div>
       <div class="sub" id="targetSub">—</div>
     </div>
-    <button id="gearBtn">⚙︎</button>
+    <div style="display:flex; gap:8px;">
+      <button id="infoBtn">ⓘ</button>
+      <button id="gearBtn">⚙︎</button>
+    </div>
   </div>
 
   <div id="arrowLeft" class="edgeArrow"><span class="glyph">←</span><span class="deg"></span></div>
@@ -151,6 +161,7 @@
   <div id="arrowDown" class="edgeArrow"><span class="glyph">↓</span><span class="deg"></span></div>
 
   <div id="guidePanel">
+    <div id="noCamNote"></div>
     <div id="guideText">Getting your location…</div>
     <div id="guideSub"></div>
   </div>
@@ -182,13 +193,28 @@
       <div class="hint">Local time zone offset: <input type="number" id="manTz" step="0.5" value="2" style="width:60px; display:inline-block;"> hours from UTC</div>
     </div>
     <div class="hint" id="sensorStatus" style="margin-top:14px;"></div>
+    <button id="loadAnotherBtn" style="width:100%; margin-top:16px;">Load a different map</button>
+  </div>
 
-    <h2 style="margin-top:20px;">Best time to view</h2>
+  <div id="infoPanel">
+    <div class="closeRow"><button id="closeInfoBtn">Close ✕</button></div>
+    <h1 id="infoTitle" style="font-size:20px; margin:0 0 4px;">—</h1>
+    <p id="infoSub" class="hint" style="margin:0 0 20px;">—</p>
+
+    <h2>Best time to view</h2>
     <p class="hint">Finds the next week's darkest, highest-in-the-sky windows for this constellation, and checks the cloud forecast for each.</p>
     <button id="findBestTimeBtn" style="width:100%;">🔭 Find best time to view</button>
     <div id="bestTimeResults"></div>
 
-    <button id="loadAnotherBtn" style="width:100%; margin-top:16px;">Load a different map</button>
+    <h2 style="margin-top:24px;">The stars in this portrait</h2>
+    <p class="hint" id="infoConstellations"></p>
+    <div class="starList" id="infoStars"></div>
+
+    <h2 style="margin-top:24px;">Other notable stars nearby</h2>
+    <div class="starList" id="infoFieldStars"></div>
+
+    <h2 style="margin-top:24px;">Further out: galaxies, nebulae, clusters</h2>
+    <div class="starList" id="infoDso"></div>
   </div>
 </div>
 
@@ -332,9 +358,9 @@
   function loadMapObject(obj, sourceLabel){
     map = obj;
     document.getElementById('loadStatus').textContent = '';
-    document.getElementById('summaryTitle').textContent = summarizeStars(map.stars);
+    document.getElementById('summaryTitle').textContent = map.name || summarizeStars(map.stars);
     document.getElementById('summarySub').textContent = `${map.stars.length} stars · ${sourceLabel}`;
-    document.getElementById('summaryStars').innerHTML = map.stars.map(describeStarHtml).join('');
+    buildInfoPanel();
     if(map.observerDefault){
       lat = map.observerDefault.lat; lon = map.observerDefault.lon;
       document.getElementById('manLat').value = lat;
@@ -386,6 +412,46 @@
     if(info && info.type) lines.push(`Type: ${escapeHtml(info.type)}.`);
     if(info && info.note) lines.push(escapeHtml(info.note));
     return `<div class="starEntry"><b>${escapeHtml(s.name)}</b><div class="starMeta">${lines.join(' ')}</div></div>`;
+  }
+
+  // Named field stars (fieldStarsFormat: [ra_deg, dec_deg, mag, name_or_null])
+  // are the bright, recognizable stars shown for context around the portrait
+  // but not used in it — worth surfacing separately as "what else is nearby".
+  function describeFieldStarHtml(f){
+    const [, , mag, name] = f;
+    if(!name) return '';
+    const info = (window.STAR_INFO && window.STAR_INFO[name]) || null;
+    const lines = [`Apparent magnitude ${mag} — ${describeBrightness(mag)}.`];
+    if(info && info.distanceLy) lines.push(`About ${info.distanceLy.toLocaleString('en-US')} light-years from Earth.`);
+    if(info && info.type) lines.push(`Type: ${escapeHtml(info.type)}.`);
+    if(info && info.note) lines.push(escapeHtml(info.note));
+    return `<div class="starEntry"><b>${escapeHtml(name)}</b><div class="starMeta">${lines.join(' ')}</div></div>`;
+  }
+
+  function buildInfoPanel(){
+    if(!map) return;
+    document.getElementById('infoTitle').textContent = map.name || summarizeStars(map.stars);
+    document.getElementById('infoSub').textContent = `${map.stars.length} stars used in the portrait`;
+
+    document.getElementById('infoStars').innerHTML = map.stars.map(describeStarHtml).join('');
+
+    const cons = [...new Set(map.stars.map(s=>s.constellation))];
+    document.getElementById('infoConstellations').textContent =
+      `This portrait spans part of ${cons.length > 1 ? 'the official constellations' : 'the official constellation'} ${cons.join(', ')}.`;
+
+    const namedField = (map.fieldStars || []).filter(f => f[3]).sort((a,b) => a[2]-b[2]).slice(0, 8);
+    const fieldEl = document.getElementById('infoFieldStars');
+    fieldEl.innerHTML = namedField.length
+      ? namedField.map(describeFieldStarHtml).join('')
+      : '<div class="hint">No other notable named stars nearby.</div>';
+
+    const dsoEl = document.getElementById('infoDso');
+    const dsoEntries = cons.flatMap(c => (window.DSO_INFO && window.DSO_INFO[c]) || []);
+    dsoEl.innerHTML = dsoEntries.length
+      ? dsoEntries.map(d => `<div class="starEntry"><b>${escapeHtml(d.name)}</b><div class="starMeta">${escapeHtml(d.note)}</div></div>`).join('')
+      : '<div class="hint">No notable deep-sky objects catalogued for this area yet.</div>';
+
+    document.getElementById('bestTimeResults').innerHTML = '';
   }
 
   // Precomputes each drawing-grid point's fixed (ra,dec) once at load time —
@@ -870,6 +936,8 @@
   document.getElementById('showDrawing').addEventListener('change', scheduleRender);
   document.getElementById('gearBtn').addEventListener('click', () => { document.getElementById('settingsPanel').style.display='block'; });
   document.getElementById('closeSettingsBtn').addEventListener('click', () => { document.getElementById('settingsPanel').style.display='none'; });
+  document.getElementById('infoBtn').addEventListener('click', () => { document.getElementById('infoPanel').style.display='block'; });
+  document.getElementById('closeInfoBtn').addEventListener('click', () => { document.getElementById('infoPanel').style.display='none'; });
 
   document.getElementById('findBestTimeBtn').addEventListener('click', async () => {
     const btn = document.getElementById('findBestTimeBtn');
@@ -911,16 +979,6 @@
     `;
   }
 
-  // Contextual shortcut: when the AR view says it's below the horizon, offer
-  // a one-click way straight to the same search instead of making the
-  // visitor go find it in Settings themselves.
-  document.getElementById('guidePanel').addEventListener('click', (e) => {
-    if(e.target && e.target.id === 'findBestTimeLink'){
-      e.preventDefault();
-      document.getElementById('settingsPanel').style.display = 'block';
-      document.getElementById('findBestTimeBtn').click();
-    }
-  });
   document.getElementById('fovVal').textContent = fovH+'°';
   document.getElementById('drawOpacityVal').textContent = '0.80';
   document.getElementById('manHeadingVal').textContent = '0°';
@@ -1058,12 +1116,12 @@
     const inViewH = Math.abs(dAz) < halfFovH, inViewV = Math.abs(dAlt) < halfFovV;
     const inView = inViewH && inViewV;
 
-    document.getElementById('targetTitle').textContent = summarizeStars(map.stars);
+    document.getElementById('targetTitle').textContent = map.name || summarizeStars(map.stars);
     document.getElementById('targetSub').textContent = `alt ${target.alt.toFixed(0)}° · az ${target.az.toFixed(0)}°`;
 
     if(target.alt < -2){
       document.getElementById('guideText').textContent = "It's below the horizon right now";
-      document.getElementById('guideSub').innerHTML = 'Try again later, or <a href="#" id="findBestTimeLink" style="color:var(--accent);">find the best time to see it</a>.';
+      document.getElementById('guideSub').textContent = 'Try again later, or check ⓘ for the best time to see it.';
     } else if(inView){
       document.getElementById('guideText').textContent = '✓ In view — look at your screen';
       document.getElementById('guideSub').textContent = 'Hold steady and match the stars to the real sky.';

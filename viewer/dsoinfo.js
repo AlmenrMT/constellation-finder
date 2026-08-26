@@ -1,0 +1,45 @@
+// Notable deep-sky objects (galaxies, nebulae, star clusters) by official
+// constellation — shown on the info page as "what else is out there" beyond
+// the stars used in the portrait itself. Curated, not exhaustive: only
+// well-documented, genuinely notable objects are listed here. A missing or
+// empty entry just means nothing especially notable is catalogued for that
+// constellation yet — not that there's nothing there.
+window.DSO_INFO = {
+  "Andromeda": [{ name: "Andromeda Galaxy (M31)", note: "The nearest large spiral galaxy to ours — visible to the naked eye from a dark sky." }],
+  "Aquarius": [{ name: "Saturn Nebula (NGC 7009)", note: "A small, bright planetary nebula." }, { name: "Helix Nebula (NGC 7293)", note: "One of the closest planetary nebulae to Earth." }],
+  "Aquila": [{ name: "NGC 6709", note: "An open star cluster." }],
+  "Auriga": [{ name: "M36, M37, M38", note: "Three bright open star clusters — easy binocular targets." }],
+  "Bootes": [{ name: "NGC 5466", note: "A faint globular cluster." }],
+  "Cancer": [{ name: "Beehive Cluster (M44)", note: "A large, bright open cluster visible to the naked eye." }],
+  "Canis Major": [{ name: "M41", note: "An open cluster near Sirius." }],
+  "Capricornus": [{ name: "M30", note: "A globular cluster." }],
+  "Cassiopeia": [{ name: "Owl Cluster (NGC 457)", note: "An open cluster that resembles an owl." }, { name: "M52", note: "A rich open cluster." }],
+  "Cepheus": [{ name: "NGC 188", note: "One of the oldest known open clusters." }],
+  "Cetus": [{ name: "M77", note: "A bright spiral galaxy." }],
+  "Coma Berenices": [{ name: "Coma Star Cluster", note: "A large, loose naked-eye star cluster." }, { name: "Black Eye Galaxy (M64)", note: "A spiral galaxy with a striking dark dust band." }],
+  "Corvus": [{ name: "Antennae Galaxies (NGC 4038/4039)", note: "A pair of colliding galaxies." }],
+  "Cygnus": [{ name: "North America Nebula (NGC 7000)", note: "A large emission nebula shaped like the continent." }, { name: "Veil Nebula", note: "The remnant of an ancient supernova." }],
+  "Draco": [{ name: "Cat's Eye Nebula (NGC 6543)", note: "A bright, colorful planetary nebula." }],
+  "Eridanus": [{ name: "NGC 1300", note: "A well-known barred spiral galaxy." }],
+  "Gemini": [{ name: "M35", note: "A large open cluster." }, { name: "Eskimo Nebula (NGC 2392)", note: "A planetary nebula." }],
+  "Hercules": [{ name: "Great Globular Cluster (M13)", note: "One of the brightest globular clusters visible from the northern sky." }],
+  "Hydra": [{ name: "M83", note: "A bright barred spiral galaxy." }],
+  "Leo": [{ name: "Leo Triplet (M65, M66, NGC 3628)", note: "A group of interacting spiral galaxies." }],
+  "Lepus": [{ name: "M79", note: "A globular cluster." }],
+  "Lyra": [{ name: "Ring Nebula (M57)", note: "A famous, bright planetary nebula." }],
+  "Monoceros": [{ name: "Rosette Nebula", note: "A large emission nebula surrounding an open cluster." }, { name: "Christmas Tree Cluster", note: "A festive-looking open cluster." }],
+  "Ophiuchus": [{ name: "M10, M12", note: "Two bright globular clusters." }],
+  "Orion": [{ name: "Orion Nebula (M42)", note: "A vast stellar nursery, visible to the naked eye below Orion's Belt." }, { name: "Horsehead Nebula", note: "A famous dark nebula silhouette." }],
+  "Pegasus": [{ name: "M15", note: "A dense, bright globular cluster." }],
+  "Perseus": [{ name: "Double Cluster (NGC 869/884)", note: "Two neighboring open clusters — a classic binocular target." }],
+  "Puppis": [{ name: "M46, M47", note: "A pair of open clusters." }],
+  "Sagittarius": [{ name: "Lagoon Nebula (M8)", note: "A bright star-forming nebula." }, { name: "Trifid Nebula (M20)", note: "A colorful nebula split into lobes by dark dust lanes." }],
+  "Scorpius": [{ name: "Butterfly Cluster (M6)", note: "An open cluster shaped like a butterfly." }, { name: "Ptolemy Cluster (M7)", note: "A large, bright naked-eye open cluster." }],
+  "Scutum": [{ name: "Wild Duck Cluster (M11)", note: "A dense, rich open cluster." }],
+  "Serpens": [{ name: "Eagle Nebula (M16)", note: "Home to the famous 'Pillars of Creation'." }],
+  "Taurus": [{ name: "Pleiades (M45)", note: "The 'Seven Sisters' — a bright naked-eye open cluster." }, { name: "Crab Nebula (M1)", note: "The remnant of a supernova observed in 1054 AD." }],
+  "Triangulum": [{ name: "Triangulum Galaxy (M33)", note: "A face-on spiral galaxy — one of the most distant objects visible to the naked eye." }],
+  "Ursa Major": [{ name: "M81 and M82", note: "A bright spiral galaxy (M81) paired closely with the 'Cigar Galaxy' (M82)." }],
+  "Virgo": [{ name: "Virgo Cluster", note: "A vast cluster of thousands of galaxies, including the giant elliptical M87." }],
+  "Vulpecula": [{ name: "Dumbbell Nebula (M27)", note: "A bright, large planetary nebula." }],
+};
