@@ -74,6 +74,24 @@
   #addressFields.show{ display:block; }
   .field-row{ display:grid; grid-template-columns:1fr 1fr; gap:12px; }
   @media (max-width:480px){ .field-row{ grid-template-columns:1fr; } }
+
+  .item-block{ background:var(--panel2); border:1px solid var(--border); border-radius:12px; padding:18px; margin-bottom:16px; }
+  .item-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+  .item-head .item-label{ font-weight:700; font-size:14px; }
+  .item-head .remove-item{ background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; text-decoration:underline; padding:0; }
+  .item-head .remove-item:hover{ color:var(--text); }
+  button.add-item{
+    width:100%; background:none; border:1px dashed var(--border); color:var(--text); font-weight:600; font-size:14px;
+    padding:12px; border-radius:10px; cursor:pointer; margin-bottom:20px;
+  }
+  button.add-item:hover{ border-color:var(--accent); color:var(--accent); }
+
+  .summary-card{ background:var(--panel2); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:18px; }
+  .summary-row{ display:flex; justify-content:space-between; font-size:14px; padding:5px 0; color:var(--muted); }
+  .summary-row .item-name{ color:var(--text); }
+  .summary-row.total{ border-top:1px solid var(--border); margin-top:6px; padding-top:10px; font-weight:700; font-size:15px; color:var(--text); }
+  .summary-note{ color:var(--muted); font-size:12px; margin-top:4px; }
+
   button.submit{
     width:100%; background:var(--accent); color:var(--accent-ink); font-weight:700; font-size:15px;
     border:none; padding:14px; border-radius:10px; cursor:pointer; margin-top:6px;
@@ -161,55 +179,16 @@
 
   <section id="order">
     <h2>Order your poster</h2>
-    <p class="section-lead">Fill in the details below. We'll email you to confirm and arrange payment before we start on your poster.</p>
+    <p class="section-lead">One order can include more than one constellation — add another if you're doing one per family member. We'll email you to confirm and arrange payment before we start.</p>
 
     <form class="order" id="orderForm">
-      <div class="field">
-        <label for="photo">Photo to turn into a line portrait</label>
-        <input type="file" id="photo" accept="image/*" required>
-        <div class="hint">JPG or PNG, ideally a clear, well-lit subject.</div>
-      </div>
+      <div id="itemsContainer"></div>
+
+      <button type="button" class="add-item" id="addItemBtn">+ Add another constellation</button>
 
       <div class="field">
         <label for="email">Your email address</label>
         <input type="email" id="email" placeholder="you@example.com" required>
-      </div>
-
-      <div class="field">
-        <label for="title">Poster title</label>
-        <input type="text" id="title" placeholder="e.g. Jonas" maxlength="60" required>
-      </div>
-
-      <div class="field">
-        <label for="hemisphere">Hemisphere</label>
-        <select id="hemisphere" required>
-          <option value="" disabled selected>Choose one…</option>
-          <option value="Northern">Northern hemisphere</option>
-          <option value="Southern">Southern hemisphere</option>
-        </select>
-        <div class="hint">Whichever hemisphere you'll actually be standing under to find it.</div>
-      </div>
-
-      <div class="field">
-        <label>Poster format</label>
-        <div class="radio-cards">
-          <label class="radio-card">
-            <input type="radio" name="product" value="pdf" data-price="20" required>
-            <div class="card-inner">
-              <div class="name">PDF poster</div>
-              <div class="price">$20 / €20</div>
-              <div class="desc">Print-ready file, delivered by email.</div>
-            </div>
-          </label>
-          <label class="radio-card">
-            <input type="radio" name="product" value="framed" data-price="35">
-            <div class="card-inner">
-              <div class="name">Framed poster</div>
-              <div class="price">$35 / €35</div>
-              <div class="desc">Printed, framed, and shipped to you.</div>
-            </div>
-          </label>
-        </div>
       </div>
 
       <div id="addressFields">
@@ -233,8 +212,20 @@
         </div>
         <div class="field">
           <label for="addrCountry">Country</label>
-          <input type="text" id="addrCountry">
+          <select id="addrCountry"></select>
+          <div class="hint">Used only to work out shipping — Europe €5, elsewhere $10, free over $100.</div>
         </div>
+      </div>
+
+      <div class="summary-card" id="orderSummary">
+        <div id="summaryItems"></div>
+        <div class="summary-row" id="summaryShippingRow" style="display:none;">
+          <span>Shipping</span><span id="summaryShipping">—</span>
+        </div>
+        <div class="summary-row total">
+          <span>Total</span><span id="summaryTotal">—</span>
+        </div>
+        <div class="summary-note" id="summaryNote"></div>
       </div>
 
       <button type="submit" class="submit" id="submitBtn">Place order</button>
@@ -249,6 +240,54 @@
     </div>
   </section>
 
+  <template id="itemTemplate">
+    <div class="item-block">
+      <div class="item-head">
+        <span class="item-label">Poster 1</span>
+        <button type="button" class="remove-item">Remove</button>
+      </div>
+      <div class="field">
+        <label>Photo to turn into a line portrait</label>
+        <input type="file" class="f-photo" accept="image/*" required>
+        <div class="hint">JPG or PNG, ideally a clear, well-lit subject.</div>
+      </div>
+      <div class="field">
+        <label>Poster title</label>
+        <input type="text" class="f-title" placeholder="e.g. Jonas" maxlength="60" required>
+      </div>
+      <div class="field">
+        <label>Hemisphere</label>
+        <select class="f-hemisphere" required>
+          <option value="" disabled selected>Choose one…</option>
+          <option value="Northern">Northern hemisphere</option>
+          <option value="Southern">Southern hemisphere</option>
+        </select>
+        <div class="hint">Whichever hemisphere you'll actually be standing under to find it.</div>
+      </div>
+      <div class="field">
+        <label>Poster format</label>
+        <div class="radio-cards">
+          <label class="radio-card">
+            <input type="radio" class="f-product" value="pdf" required>
+            <div class="card-inner">
+              <div class="name">PDF poster</div>
+              <div class="price">$20 / €20</div>
+              <div class="desc">Print-ready file, delivered by email.</div>
+            </div>
+          </label>
+          <label class="radio-card">
+            <input type="radio" class="f-product" value="framed">
+            <div class="card-inner">
+              <div class="name">Framed poster</div>
+              <div class="price">$40 / €40 + shipping</div>
+              <div class="desc">Printed, framed, and shipped to you.</div>
+            </div>
+          </label>
+        </div>
+      </div>
+    </div>
+  </template>
+
   <footer>
     Star Portrait Posters — made with real star catalog data. Photos are only used to create your poster.
     <br>
@@ -262,19 +301,146 @@
 (function(){
   const supabase = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
+  const PRICES = { pdf: 20, framed: 40 };
+  const SHIPPING = { europe: 5, row: 10 };
+  const FREE_SHIPPING_THRESHOLD = 100;
+
+  // Broad "Europe" for shipping purposes (EU + EFTA + UK + microstates), not
+  // a strict EU list — everything else is charged the rest-of-world rate.
+  const EUROPE_COUNTRIES = [
+    'Austria','Belgium','Bulgaria','Croatia','Cyprus','Czechia','Denmark','Estonia','Finland','France',
+    'Germany','Greece','Hungary','Iceland','Ireland','Italy','Latvia','Liechtenstein','Lithuania',
+    'Luxembourg','Malta','Netherlands','Norway','Poland','Portugal','Romania','Slovakia','Slovenia',
+    'Spain','Sweden','Switzerland','United Kingdom','Andorra','Monaco','San Marino','Vatican City',
+  ];
+  const REST_OF_WORLD_COUNTRIES = [
+    'United States','Canada','Mexico','Brazil','Argentina','Australia','New Zealand','Japan','South Korea',
+    'China','India','Singapore','United Arab Emirates','Israel','South Africa','Other',
+  ];
+
   const form = document.getElementById('orderForm');
+  const itemsContainer = document.getElementById('itemsContainer');
+  const itemTemplate = document.getElementById('itemTemplate');
   const addressFields = document.getElementById('addressFields');
+  const countrySelect = document.getElementById('addrCountry');
   const successPanel = document.getElementById('successPanel');
   const formError = document.getElementById('formError');
   const submitBtn = document.getElementById('submitBtn');
 
-  form.querySelectorAll('input[name="product"]').forEach(el => {
-    el.addEventListener('change', () => {
-      const isFramed = form.querySelector('input[name="product"]:checked').value === 'framed';
-      addressFields.classList.toggle('show', isFramed);
-      addressFields.querySelectorAll('input').forEach(i => i.required = isFramed);
+  function populateCountrySelect(){
+    const groups = [
+      ['Europe', EUROPE_COUNTRIES, 'europe'],
+      ['Rest of world', REST_OF_WORLD_COUNTRIES, 'row'],
+    ];
+    countrySelect.innerHTML = '<option value="" disabled selected>Choose a country…</option>' + groups.map(([label, list, region]) =>
+      `<optgroup label="${label}">${list.map(c => `<option value="${c}" data-region="${region}">${c}</option>`).join('')}</optgroup>`
+    ).join('');
+  }
+  populateCountrySelect();
+
+  function itemBlocks(){ return [...itemsContainer.querySelectorAll('.item-block')]; }
+
+  function addItem(){
+    const frag = itemTemplate.content.cloneNode(true);
+    itemsContainer.appendChild(frag);
+    refreshItemChrome();
+    updateSummary();
+  }
+
+  function refreshItemChrome(){
+    const blocks = itemBlocks();
+    blocks.forEach((b, i) => {
+      b.querySelector('.item-label').textContent = 'Poster ' + (i + 1);
+      b.querySelector('.remove-item').style.display = blocks.length > 1 ? '' : 'none';
     });
+  }
+
+  document.getElementById('addItemBtn').addEventListener('click', addItem);
+  itemsContainer.addEventListener('click', e => {
+    if(e.target.classList.contains('remove-item')){
+      e.target.closest('.item-block').remove();
+      refreshItemChrome();
+      updateSummary();
+    }
   });
+  itemsContainer.addEventListener('change', e => {
+    if(e.target.classList.contains('f-product')) updateSummary();
+  });
+  itemsContainer.addEventListener('input', e => {
+    if(e.target.classList.contains('f-title')) updateSummary();
+  });
+  countrySelect.addEventListener('change', updateSummary);
+
+  function currentRegion(){
+    const opt = countrySelect.selectedOptions[0];
+    return opt ? opt.dataset.region : null;
+  }
+
+  function anyFramedSelected(){
+    return itemBlocks().some(b => {
+      const checked = b.querySelector('.f-product:checked');
+      return checked && checked.value === 'framed';
+    });
+  }
+
+  function updateSummary(){
+    const framed = anyFramedSelected();
+    addressFields.classList.toggle('show', framed);
+    addressFields.querySelectorAll('input, select').forEach(i => { i.required = framed; });
+
+    const blocks = itemBlocks();
+    const summaryItemsEl = document.getElementById('summaryItems');
+    const shippingRowEl = document.getElementById('summaryShippingRow');
+    const shippingEl = document.getElementById('summaryShipping');
+    const totalEl = document.getElementById('summaryTotal');
+    const noteEl = document.getElementById('summaryNote');
+
+    let itemsTotal = 0;
+    let anySelected = false;
+    summaryItemsEl.innerHTML = blocks.map((b, i) => {
+      const checked = b.querySelector('.f-product:checked');
+      const title = b.querySelector('.f-title').value.trim() || ('Poster ' + (i + 1));
+      if(checked){
+        anySelected = true;
+        itemsTotal += PRICES[checked.value];
+        const label = checked.value === 'framed' ? 'Framed' : 'PDF';
+        return `<div class="summary-row"><span class="item-name">${escapeHtml(title)} (${label})</span><span>$${PRICES[checked.value]} / €${PRICES[checked.value]}</span></div>`;
+      }
+      return `<div class="summary-row"><span class="item-name">${escapeHtml(title)}</span><span>choose a format</span></div>`;
+    }).join('');
+
+    if(!framed){
+      shippingRowEl.style.display = 'none';
+      totalEl.textContent = anySelected ? `$${itemsTotal} / €${itemsTotal}` : '—';
+      noteEl.textContent = '';
+      return;
+    }
+
+    shippingRowEl.style.display = '';
+    const region = currentRegion();
+    if(itemsTotal >= FREE_SHIPPING_THRESHOLD){
+      shippingEl.textContent = 'Free';
+      const sym = region === 'europe' ? '€' : '$';
+      totalEl.textContent = `${sym}${itemsTotal}`;
+      noteEl.textContent = 'Free shipping — order is over $100 / €100.';
+    }else if(region){
+      const sym = region === 'europe' ? '€' : '$';
+      const shipping = SHIPPING[region];
+      shippingEl.textContent = `${sym}${shipping}`;
+      totalEl.textContent = `${sym}${itemsTotal + shipping}`;
+      noteEl.textContent = '';
+    }else{
+      shippingEl.textContent = 'depends on country';
+      totalEl.textContent = `$${itemsTotal} / €${itemsTotal} + shipping`;
+      noteEl.textContent = 'Choose your country below to see the exact shipping cost.';
+    }
+  }
+
+  function escapeHtml(s){
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  addItem();
 
   function fileToResizedBlob(file, maxDim){
     return new Promise((resolve, reject) => {
@@ -296,99 +462,125 @@
     });
   }
 
+  async function validateImage(file){
+    if(!file) throw new Error('missing');
+    if(!file.type.startsWith('image/')) throw new Error('type');
+    if(file.size > 25 * 1024 * 1024) throw new Error('size');
+    await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = resolve;
+      img.onerror = () => reject(new Error('unreadable'));
+      img.src = URL.createObjectURL(file);
+    });
+  }
+
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     formError.style.display = 'none';
 
-    const photoFile = document.getElementById('photo').files[0];
-    const productInput = form.querySelector('input[name="product"]:checked');
-    const email = document.getElementById('email').value.trim();
-    const title = document.getElementById('title').value.trim();
-    const hemisphere = document.getElementById('hemisphere').value;
     const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const email = document.getElementById('email').value.trim();
+    const blocks = itemBlocks();
+    const framed = anyFramedSelected();
 
-    if(!photoFile || !productInput || !title || !hemisphere){
-      formError.textContent = 'Please fill in a photo, title, hemisphere and poster format.';
-      formError.style.display = 'block';
-      return;
+    const items = blocks.map(b => ({
+      photoFile: b.querySelector('.f-photo').files[0],
+      title: b.querySelector('.f-title').value.trim(),
+      hemisphere: b.querySelector('.f-hemisphere').value,
+      product: (b.querySelector('.f-product:checked') || {}).value,
+    }));
+
+    for(const it of items){
+      if(!it.photoFile || !it.title || !it.hemisphere || !it.product){
+        formError.textContent = 'Please fill in a photo, title, hemisphere and format for every poster.';
+        formError.style.display = 'block';
+        return;
+      }
     }
     if(!EMAIL_RE.test(email)){
       formError.textContent = 'That email address doesn\'t look right — please check it.';
       formError.style.display = 'block';
       return;
     }
-    if(!photoFile.type.startsWith('image/')){
-      formError.textContent = 'Please choose an image file (JPG or PNG).';
+    const address = framed ? {
+      name: document.getElementById('addrName').value.trim(),
+      street: document.getElementById('addrStreet').value.trim(),
+      city: document.getElementById('addrCity').value.trim(),
+      postal: document.getElementById('addrPostal').value.trim(),
+      country: countrySelect.value,
+    } : null;
+    if(framed && (!address.name || !address.street || !address.city || !address.postal || !address.country)){
+      formError.textContent = 'Please fill in the full shipping address for your framed poster(s).';
       formError.style.display = 'block';
       return;
     }
-    if(photoFile.size > 25 * 1024 * 1024){
-      formError.textContent = 'That photo is too large (max 25MB) — please choose a smaller file.';
-      formError.style.display = 'block';
-      return;
-    }
-    try{
-      await new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = resolve;
-        img.onerror = () => reject(new Error('unreadable'));
-        img.src = URL.createObjectURL(photoFile);
-      });
-    }catch(_){
-      formError.textContent = 'That file doesn\'t look like a valid image — please choose another.';
-      formError.style.display = 'block';
-      return;
+    const region = framed ? currentRegion() : null;
+
+    for(const it of items){
+      try{
+        await validateImage(it.photoFile);
+      }catch(err){
+        formError.textContent = err.message === 'size'
+          ? 'One of your photos is too large (max 25MB) — please choose a smaller file.'
+          : 'One of your files doesn\'t look like a valid image — please check each poster\'s photo.';
+        formError.style.display = 'block';
+        return;
+      }
     }
 
     submitBtn.disabled = true;
     submitBtn.textContent = 'Sending…';
 
     try{
-      const isFramed = productInput.value === 'framed';
-      const productLabel = isFramed ? 'Framed poster' : 'PDF poster';
-      const price = productInput.dataset.price;
-      const address = isFramed ? {
-        name: document.getElementById('addrName').value.trim(),
-        street: document.getElementById('addrStreet').value.trim(),
-        city: document.getElementById('addrCity').value.trim(),
-        postal: document.getElementById('addrPostal').value.trim(),
-        country: document.getElementById('addrCountry').value.trim(),
-      } : null;
-
       const { data: rows, error: rpcError } = await supabase.rpc('create_order', {
         p_email: email,
         p_name: address ? address.name : null,
-        p_title: title,
-        p_hemisphere: hemisphere,
-        p_product_type: isFramed ? 'framed' : 'pdf',
-        p_price: price,
-        p_currency: 'USD/EUR',
+        p_items: items.map(it => ({ title: it.title, hemisphere: it.hemisphere, product_type: it.product })),
+        p_shipping_region: region,
         p_shipping_address: address,
       });
       if(rpcError) throw rpcError;
-      const { customer_no, order_no, constellation_no } = rows[0];
+      if(rows.length !== items.length) throw new Error('Server returned an unexpected number of items.');
 
-      const photoBlob = await fileToResizedBlob(photoFile, 2000);
-      const photoPath = `${customer_no}/${order_no}/original.jpg`;
-      const { error: uploadError } = await supabase.storage.from('posters').upload(photoPath, photoBlob, {
-        contentType: 'image/jpeg',
-      });
-      if(uploadError) throw uploadError;
+      const { customer_no, order_no } = rows[0];
 
-      const { error: pathError } = await supabase.rpc('set_original_path', {
-        p_constellation_no: constellation_no,
-        p_path: photoPath,
-      });
-      if(pathError) throw pathError;
+      for(let i = 0; i < items.length; i++){
+        const constellation_no = rows[i].constellation_no;
+        const photoBlob = await fileToResizedBlob(items[i].photoFile, 2000);
+        const photoPath = `${customer_no}/${order_no}/${constellation_no}/original.jpg`;
+        const { error: uploadError } = await supabase.storage.from('posters').upload(photoPath, photoBlob, {
+          contentType: 'image/jpeg',
+        });
+        if(uploadError) throw uploadError;
+
+        const { error: pathError } = await supabase.rpc('set_original_path', {
+          p_constellation_no: constellation_no,
+          p_path: photoPath,
+        });
+        if(pathError) throw pathError;
+      }
+
+      const itemsTotal = items.reduce((sum, it) => sum + PRICES[it.product], 0);
+      const shippingCost = framed ? (itemsTotal >= FREE_SHIPPING_THRESHOLD ? 0 : SHIPPING[region]) : 0;
+      const total = itemsTotal + shippingCost;
 
       // Best-effort: a failed notification shouldn't block the order the
       // customer just successfully placed — the order is already saved.
       supabase.functions.invoke('notify-admin', {
-        body: { order_no, customer_no, email, title, hemisphere, product: productLabel, price, address },
+        body: {
+          order_no, customer_no, email,
+          items: items.map(it => ({ title: it.title, hemisphere: it.hemisphere, product: it.product })),
+          shippingCost: framed ? `$${shippingCost} / €${shippingCost}` : 'none',
+          total: `$${total} / €${total}`,
+          address,
+        },
       }).catch(() => {});
 
+      const itemSummary = items.length === 1
+        ? `"${items[0].title}"`
+        : `${items.length} posters (${items.map(it => `"${it.title}"`).join(', ')})`;
       document.getElementById('successSummary').textContent =
-        `Order ${order_no} — "${title}" — ${productLabel} (${price}) — confirmation to ${email}.`;
+        `Order ${order_no} — ${itemSummary} — total $${total} / €${total} — confirmation to ${email}.`;
       form.style.display = 'none';
       successPanel.style.display = 'block';
     }catch(err){

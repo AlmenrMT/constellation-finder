@@ -33,7 +33,10 @@
   .status-select{ background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:7px 10px; border-radius:8px; font-size:13px; }
   .meta-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px; margin-bottom:16px; font-size:13px; }
   .meta-grid .label{ color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.03em; margin-bottom:2px; }
-  .files{ border-top:1px solid var(--border); padding-top:14px; display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
+  .constellation-block{ border-top:1px solid var(--border); padding-top:16px; margin-top:4px; }
+  .constellation-block .c-head{ font-size:14px; font-weight:700; margin-bottom:10px; }
+  .constellation-block .c-head span{ font-weight:400; color:var(--muted); font-size:12.5px; }
+  .files{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; }
   .file-slot{ background:var(--panel2); border:1px solid var(--border); border-radius:10px; padding:12px; }
   .file-slot .label{ font-size:12px; color:var(--muted); margin-bottom:8px; }
   .file-slot a{ color:var(--accent); font-size:13px; text-decoration:none; }
@@ -128,17 +131,23 @@
 
   async function renderOrderCard(order){
     const customer = order.customers;
-    const constellation = (order.constellations && order.constellations[0]) || {};
+    const constellations = order.constellations || [];
     const card = document.createElement('div');
     card.className = 'order-card';
 
     const addr = order.shipping_address;
     const addrText = addr ? [addr.name, addr.street, addr.city, addr.postal, addr.country].filter(Boolean).join(', ') : '—';
+    const titleSummary = constellations.length === 1
+      ? (constellations[0].title || '(untitled)')
+      : `${constellations.length} posters`;
+    const shippingText = order.shipping_cost > 0
+      ? `${order.shipping_cost} (${order.shipping_region === 'europe' ? 'Europe' : 'Rest of world'})`
+      : (order.shipping_region ? 'Free' : '—');
 
     card.innerHTML = `
       <div class="order-head">
         <div>
-          <div class="title">${constellation.title || '(untitled)'}</div>
+          <div class="title">${titleSummary}</div>
           <div class="ids">${order.order_no} · ${customer.customer_no} · ${customer.email}</div>
         </div>
         <select class="status-select">
@@ -146,12 +155,12 @@
         </select>
       </div>
       <div class="meta-grid">
-        <div><div class="label">Product</div>${order.product_type === 'framed' ? 'Framed poster' : 'PDF poster'} (${order.price} ${order.currency})</div>
-        <div><div class="label">Hemisphere</div>${constellation.hemisphere || '—'}</div>
+        <div><div class="label">Order total</div>${order.price} ${order.currency}</div>
+        <div><div class="label">Shipping</div>${shippingText}</div>
         <div><div class="label">Ordered</div>${new Date(order.created_at).toLocaleDateString()}</div>
         <div><div class="label">Shipping address</div>${addrText}</div>
       </div>
-      <div class="files"></div>
+      <div class="constellations"></div>
     `;
 
     card.querySelector('.status-select').addEventListener('change', async (e) => {
@@ -159,15 +168,32 @@
       if(error) alert('Could not update status: ' + error.message);
     });
 
-    const filesEl = card.querySelector('.files');
-    for(const slot of FILE_SLOTS){
-      filesEl.appendChild(await renderFileSlot(order, constellation, slot));
+    const constellationsEl = card.querySelector('.constellations');
+    for(const constellation of constellations){
+      constellationsEl.appendChild(await renderConstellationBlock(order, customer, constellation));
     }
 
     return card;
   }
 
-  async function renderFileSlot(order, constellation, slot){
+  async function renderConstellationBlock(order, customer, constellation){
+    const block = document.createElement('div');
+    block.className = 'constellation-block';
+    const productLabel = constellation.product_type === 'framed' ? 'Framed poster' : 'PDF poster';
+    block.innerHTML = `
+      <div class="c-head">${constellation.title || '(untitled)'} — ${constellation.constellation_no}
+        <span>${productLabel} ($${constellation.item_price}) · ${constellation.hemisphere}</span>
+      </div>
+      <div class="files"></div>
+    `;
+    const filesEl = block.querySelector('.files');
+    for(const slot of FILE_SLOTS){
+      filesEl.appendChild(await renderFileSlot(order, customer, constellation, slot));
+    }
+    return block;
+  }
+
+  async function renderFileSlot(order, customer, constellation, slot){
     const el = document.createElement('div');
     el.className = 'file-slot';
     const path = constellation[slot.key];
@@ -193,7 +219,7 @@
         const file = fileInput.files[0];
         if(!file) return;
         const ext = file.name.split('.').pop();
-        const newPath = `${order.customers.customer_no}/${order.order_no}/${slot.key.replace('_path','')}.${ext}`;
+        const newPath = `${customer.customer_no}/${order.order_no}/${constellation.constellation_no}/${slot.key.replace('_path','')}.${ext}`;
         const { error: upErr } = await supabase.storage.from('posters').upload(newPath, file, {
           contentType: slot.contentType, upsert: true,
         });
@@ -225,11 +251,11 @@
               'Authorization': 'Bearer ' + sessionData.session.access_token,
               'Content-Type': 'application/json',
             },
-            body: JSON.stringify({ order_no: order.order_no }),
+            body: JSON.stringify({ order_no: order.order_no, constellation_no: constellation.constellation_no }),
           });
           const result = await resp.json();
           if(!resp.ok || !result.ok) throw new Error(result.error || ('HTTP ' + resp.status));
-          sendStatus.textContent = 'Sent to ' + order.customers.email + '.';
+          sendStatus.textContent = 'Sent to ' + customer.email + '.';
           sendStatus.style.color = 'var(--good)';
         }catch(err){
           sendStatus.textContent = 'Could not send: ' + (err.message || err);

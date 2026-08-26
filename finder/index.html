@@ -275,6 +275,7 @@
   }
   let originalPhotoImg = null; // the finished line drawing as uploaded, kept aside so Invert/Line width always recompute from a clean copy instead of compounding
   let invertOn = false;
+  let orderIdOverride = null; // set by loadOrderFromSupabase() when opened from an order
   let lineWidthValue = 0; // -3..3 pixels; positive thickens, negative thins, 0 = unchanged
   const FINDER_SIZE = 720;
 
@@ -917,7 +918,10 @@
     }
     if(isNewImage){
       autoDots = [];
-      constellationId = generateConstellationId();
+      // A sketch loaded from an order keeps that order's own K-number as the
+      // stable ID (so its QR code / viewer link never changes), instead of a
+      // fresh random one — see orderIdOverride, set by loadOrderFromSupabase.
+      constellationId = orderIdOverride || generateConstellationId();
       document.getElementById('constellationIdDisplay').textContent = constellationId;
       const nameInput = document.getElementById('constellationName');
       if(!nameInput.value) nameInput.value = lastLoadedFileName || '';
@@ -2563,7 +2567,8 @@
     const blob = await resp.blob();
     const file = new File([blob], 'sketch.jpg', { type: blob.type || 'image/jpeg' });
 
-    orderContext = { rowId: row.id, orderNo: order.order_no, customerNo: customer.customer_no, email: customer.email };
+    orderContext = { rowId: row.id, orderNo: order.order_no, customerNo: customer.customer_no, email: customer.email, constellationNo: row.constellation_no };
+    orderIdOverride = row.constellation_no;
     document.getElementById('constellationName').value = row.title || '';
     loadFile(file);
 
@@ -2609,7 +2614,7 @@
     pdf.addImage(c, 'PNG', 0, 0, 1000, 1400);
     const pdfBlob = pdf.output('blob');
 
-    const base = orderContext.customerNo + '/' + orderContext.orderNo + '/';
+    const base = orderContext.customerNo + '/' + orderContext.orderNo + '/' + orderContext.constellationNo + '/';
     const { error: posterErr } = await supabaseOrders.storage.from('posters')
       .upload(base + 'poster.pdf', pdfBlob, { contentType: 'application/pdf', upsert: true });
     if(posterErr) throw posterErr;
@@ -2618,6 +2623,22 @@
     const { error: jsonErr } = await supabaseOrders.storage.from('posters')
       .upload(base + 'constellation.json', jsonBlob, { contentType: 'application/json', upsert: true });
     if(jsonErr) throw jsonErr;
+
+    // Also publish the map JSON to the public maps/ folder (same mechanism
+    // as the manual "Publish in Viewer" button, minus the manifest.json
+    // update) so the poster's QR code — which always points at this stable
+    // constellationId — actually resolves for the customer. Silently skipped
+    // if no GitHub token has been saved; the admin can publish manually later.
+    if(ghToken()){
+      try{
+        const mapPath = `maps/${orderContext.constellationNo}.json`;
+        const existingMap = await ghGetFile(mapPath);
+        await ghPutFile(mapPath, JSON.stringify(lastMatchData, null, 2), `Publish constellation: ${orderContext.constellationNo}`, existingMap?.sha);
+      }catch(err){
+        // Non-fatal: the order's files are already saved to Supabase either way.
+        console.error('Auto-publish to viewer failed:', err);
+      }
+    }
 
     const { error: dbErr } = await supabaseOrders.from('constellations')
       .update({ poster_path: base + 'poster.pdf', viewer_json_path: base + 'constellation.json' })
