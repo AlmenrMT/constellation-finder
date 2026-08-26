@@ -215,6 +215,15 @@
 
     <h2 style="margin-top:24px;">Further out: galaxies, nebulae, clusters</h2>
     <div class="starList" id="infoDso"></div>
+
+    <h2 style="margin-top:24px;">Sky map</h2>
+    <p class="hint">Drag to pan, pinch or scroll to zoom — stays near the constellation.</p>
+    <canvas id="skyMapCanvas" style="width:100%; aspect-ratio:1; background:#000; border-radius:10px; touch-action:none; display:block;"></canvas>
+    <div class="hint" id="skyMapLegend" style="margin-top:8px;">
+      <span style="color:#ffe9a8;">●</span> portrait stars &nbsp;
+      <span style="color:#dfe8ff;">●</span> other named stars &nbsp;
+      <span style="color:#6ea8fe;">✛</span> deep-sky objects
+    </div>
   </div>
 </div>
 
@@ -453,6 +462,158 @@
 
     document.getElementById('bestTimeResults').innerHTML = '';
   }
+
+  // ---------- sky map: a static (not time-dependent) finder chart around the
+  // constellation, pannable/zoomable but clamped to stay in its vicinity ----------
+  const skyMapCanvas = document.getElementById('skyMapCanvas');
+  const skyMapCtx = skyMapCanvas.getContext('2d');
+  let skyMapState = null;
+  const SKY_MAP_MIN_ZOOM = 0.6, SKY_MAP_MAX_ZOOM = 6, SKY_MAP_MAX_PAN_FRAC = 0.45;
+
+  function gnomonicToPixel(g, s, W, H){
+    return { x: W/2 + g.x*s.scale + s.offsetX, y: H/2 - g.y*s.scale + s.offsetY };
+  }
+
+  function buildSkyMap(){
+    if(!map) return;
+    // Match the canvas's backing store to its actual on-screen size — this
+    // only produces a sensible non-zero size once the info panel (and this
+    // canvas within it) is actually visible, so this is called on open, not
+    // at map-load time.
+    const rect = skyMapCanvas.getBoundingClientRect();
+    skyMapCanvas.width = Math.max(1, Math.round(rect.width));
+    skyMapCanvas.height = Math.max(1, Math.round(rect.height));
+
+    const centerRa = (map.projection && map.projection.tangentRa) ?? (map.stars.reduce((a,s)=>a+s.ra,0)/map.stars.length);
+    const centerDec = (map.projection && map.projection.tangentDec) ?? (map.stars.reduce((a,s)=>a+s.dec,0)/map.stars.length);
+
+    // gnomonic() legitimately returns null for anything too far from the
+    // tangent point (near/past 90° away) — field stars and DSOs pulled in
+    // from a whole constellation can occasionally be that far, so every use
+    // of `.g` below has to tolerate null, not just the ones close to center.
+    const portraitPts = map.stars.map(s => ({ ...s, g: gnomonic(s.ra, s.dec, centerRa, centerDec) }));
+    const fieldPts = (map.fieldStars||[])
+      .map(f => ({ ra:f[0], dec:f[1], mag:f[2], name:f[3], g: gnomonic(f[0], f[1], centerRa, centerDec) }))
+      .filter(f => f.g);
+    const cons = [...new Set(map.stars.map(s=>s.constellation))];
+    const dsoPts = cons.flatMap(c => (window.DSO_INFO && window.DSO_INFO[c]) || [])
+      .filter(d => d.ra != null && d.dec != null)
+      .map(d => ({ ...d, g: gnomonic(d.ra, d.dec, centerRa, centerDec) }))
+      .filter(d => d.g);
+
+    const portraitExtents = portraitPts.filter(p => p.g).map(p => Math.hypot(p.g.x, p.g.y));
+    const maxExtent = Math.max(0.02, ...(portraitExtents.length ? portraitExtents : [0.02]));
+    const canvasSize = Math.min(skyMapCanvas.width, skyMapCanvas.height);
+    const baseScale = (canvasSize * 0.35) / maxExtent;
+
+    skyMapState = { baseScale, scale: baseScale, offsetX: 0, offsetY: 0, portraitPts, fieldPts, dsoPts };
+    renderSkyMap();
+  }
+
+  function clampSkyMapView(){
+    const s = skyMapState;
+    s.scale = Math.max(s.baseScale*SKY_MAP_MIN_ZOOM, Math.min(s.baseScale*SKY_MAP_MAX_ZOOM, s.scale));
+    const maxPan = Math.min(skyMapCanvas.width, skyMapCanvas.height) * SKY_MAP_MAX_PAN_FRAC;
+    s.offsetX = Math.max(-maxPan, Math.min(maxPan, s.offsetX));
+    s.offsetY = Math.max(-maxPan, Math.min(maxPan, s.offsetY));
+  }
+
+  function renderSkyMap(){
+    if(!skyMapState) return;
+    const s = skyMapState, W = skyMapCanvas.width, H = skyMapCanvas.height;
+    skyMapCtx.fillStyle = '#000'; skyMapCtx.fillRect(0,0,W,H);
+    const onScreen = p => p.x > -40 && p.x < W+40 && p.y > -40 && p.y < H+40;
+
+    skyMapCtx.font = '11px -apple-system,sans-serif';
+    for(const f of s.fieldPts){
+      if(f.name) continue;
+      const p = gnomonicToPixel(f.g, s, W, H);
+      if(!onScreen(p)) continue;
+      const r = Math.max(0.5, (6-f.mag)*0.35);
+      skyMapCtx.beginPath(); skyMapCtx.arc(p.x,p.y,r,0,7); skyMapCtx.fillStyle='rgba(255,255,255,0.35)'; skyMapCtx.fill();
+    }
+    for(const f of s.fieldPts){
+      if(!f.name) continue;
+      const p = gnomonicToPixel(f.g, s, W, H);
+      if(!onScreen(p)) continue;
+      const r = Math.max(1.5, (6-f.mag)*0.5);
+      skyMapCtx.beginPath(); skyMapCtx.arc(p.x,p.y,r,0,7); skyMapCtx.fillStyle='#dfe8ff'; skyMapCtx.fill();
+      skyMapCtx.fillStyle='rgba(223,232,255,0.85)'; skyMapCtx.fillText(f.name, p.x+r+3, p.y+4);
+    }
+
+    skyMapCtx.strokeStyle = '#ffd76a'; skyMapCtx.lineWidth = 1.4;
+    for(const [a,b] of (map.edges||[])){
+      if(!s.portraitPts[a] || !s.portraitPts[a].g || !s.portraitPts[b] || !s.portraitPts[b].g) continue;
+      const pa = gnomonicToPixel(s.portraitPts[a].g, s, W, H), pb = gnomonicToPixel(s.portraitPts[b].g, s, W, H);
+      skyMapCtx.beginPath(); skyMapCtx.moveTo(pa.x,pa.y); skyMapCtx.lineTo(pb.x,pb.y); skyMapCtx.stroke();
+    }
+    skyMapCtx.font = '600 12px -apple-system,sans-serif';
+    for(const st of s.portraitPts){
+      if(!st.g) continue;
+      const p = gnomonicToPixel(st.g, s, W, H);
+      const r = Math.max(2.5, (6.5-st.mag)*0.9);
+      skyMapCtx.beginPath(); skyMapCtx.arc(p.x,p.y,r,0,7); skyMapCtx.fillStyle='#fffbe8'; skyMapCtx.strokeStyle='#ffd76a'; skyMapCtx.lineWidth=1.2; skyMapCtx.fill(); skyMapCtx.stroke();
+      skyMapCtx.fillStyle='#ffe9a8'; skyMapCtx.fillText(st.name, p.x, p.y-r-6);
+    }
+
+    skyMapCtx.font = '11px -apple-system,sans-serif';
+    for(const d of s.dsoPts){
+      const p = gnomonicToPixel(d.g, s, W, H);
+      if(!onScreen(p)) continue;
+      skyMapCtx.strokeStyle = '#6ea8fe'; skyMapCtx.lineWidth = 1.5;
+      skyMapCtx.beginPath();
+      skyMapCtx.moveTo(p.x-6,p.y); skyMapCtx.lineTo(p.x+6,p.y);
+      skyMapCtx.moveTo(p.x,p.y-6); skyMapCtx.lineTo(p.x,p.y+6);
+      skyMapCtx.stroke();
+      skyMapCtx.fillStyle='#a9c8ff'; skyMapCtx.fillText(d.name, p.x+9, p.y+4);
+    }
+  }
+
+  // Pointer Events unify mouse + touch: one active pointer pans, two pinch-zoom.
+  const skyMapPointers = new Map();
+  let skyMapPanStart = null, skyMapPinchStart = null;
+  skyMapCanvas.addEventListener('pointerdown', e => {
+    skyMapCanvas.setPointerCapture(e.pointerId);
+    skyMapPointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    if(skyMapPointers.size === 1 && skyMapState){
+      skyMapPanStart = { x:e.clientX, y:e.clientY, offsetX:skyMapState.offsetX, offsetY:skyMapState.offsetY };
+    }else if(skyMapPointers.size === 2 && skyMapState){
+      const pts = [...skyMapPointers.values()];
+      skyMapPinchStart = { dist: Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y), scale: skyMapState.scale };
+    }
+  });
+  skyMapCanvas.addEventListener('pointermove', e => {
+    if(!skyMapPointers.has(e.pointerId) || !skyMapState) return;
+    skyMapPointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    if(skyMapPointers.size === 1 && skyMapPanStart){
+      skyMapState.offsetX = skyMapPanStart.offsetX + (e.clientX - skyMapPanStart.x);
+      skyMapState.offsetY = skyMapPanStart.offsetY + (e.clientY - skyMapPanStart.y);
+      clampSkyMapView(); renderSkyMap();
+    }else if(skyMapPointers.size === 2 && skyMapPinchStart){
+      const pts = [...skyMapPointers.values()];
+      const dist = Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y);
+      skyMapState.scale = skyMapPinchStart.scale * (dist/skyMapPinchStart.dist);
+      clampSkyMapView(); renderSkyMap();
+    }
+  });
+  function endSkyMapPointer(e){
+    skyMapPointers.delete(e.pointerId);
+    skyMapPinchStart = null;
+    if(skyMapPointers.size === 1 && skyMapState){
+      const [[, pt]] = skyMapPointers;
+      skyMapPanStart = { x:pt.x, y:pt.y, offsetX:skyMapState.offsetX, offsetY:skyMapState.offsetY };
+    }else{
+      skyMapPanStart = null;
+    }
+  }
+  skyMapCanvas.addEventListener('pointerup', endSkyMapPointer);
+  skyMapCanvas.addEventListener('pointercancel', endSkyMapPointer);
+  skyMapCanvas.addEventListener('wheel', e => {
+    if(!skyMapState) return;
+    e.preventDefault();
+    skyMapState.scale *= (e.deltaY < 0 ? 1.1 : 0.9);
+    clampSkyMapView(); renderSkyMap();
+  }, { passive:false });
 
   // Precomputes each drawing-grid point's fixed (ra,dec) once at load time —
   // these don't change; only their Alt/Az (recomputed periodically) and screen
@@ -936,7 +1097,10 @@
   document.getElementById('showDrawing').addEventListener('change', scheduleRender);
   document.getElementById('gearBtn').addEventListener('click', () => { document.getElementById('settingsPanel').style.display='block'; });
   document.getElementById('closeSettingsBtn').addEventListener('click', () => { document.getElementById('settingsPanel').style.display='none'; });
-  document.getElementById('infoBtn').addEventListener('click', () => { document.getElementById('infoPanel').style.display='block'; });
+  document.getElementById('infoBtn').addEventListener('click', () => {
+    document.getElementById('infoPanel').style.display='block';
+    buildSkyMap();
+  });
   document.getElementById('closeInfoBtn').addEventListener('click', () => { document.getElementById('infoPanel').style.display='none'; });
 
   document.getElementById('findBestTimeBtn').addEventListener('click', async () => {
