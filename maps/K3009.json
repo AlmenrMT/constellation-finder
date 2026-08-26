@@ -2,7 +2,7 @@
   "schema": "constellation-map-v1",
   "id": "K3009",
   "name": "Jonas",
-  "generatedAt": "2026-08-26T20:45:54.324Z",
+  "generatedAt": "2026-08-26T20:52:24.703Z",
   "howToRender": {
     "summary": "Everything needed to redraw this chart and re-align \"drawing\" with the stars, independent of this app.",
     "starProjection": "Place star (ra,dec) at gnomonic(ra, dec, view.centerRa, view.centerDec) -> {x,y} tangent-plane units, then apply your own pan/zoom/scale to pixels.",
