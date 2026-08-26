@@ -484,8 +484,13 @@
   let skyMapState = null;
   const SKY_MAP_MIN_ZOOM = 0.6, SKY_MAP_MAX_ZOOM = 6, SKY_MAP_MAX_PAN_FRAC = 0.45;
 
+  // x is negated: raw gnomonic x ("RA increases -> right") only matches the
+  // real sky by coincidence of facing direction — it's not the naked-eye
+  // orientation. Negating it agrees with the AR view here (built from real
+  // az/heading, physically grounded) and with the poster (same fix applied
+  // in constellation-finder's chart/poster toPixel).
   function gnomonicToPixel(g, s, W, H){
-    return { x: W/2 + g.x*s.scale + s.offsetX, y: H/2 - g.y*s.scale + s.offsetY };
+    return { x: W/2 - g.x*s.scale + s.offsetX, y: H/2 - g.y*s.scale + s.offsetY };
   }
 
   function buildSkyMap(){
