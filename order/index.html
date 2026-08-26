@@ -340,8 +340,14 @@
 
   function itemBlocks(){ return [...itemsContainer.querySelectorAll('.item-block')]; }
 
+  let itemCounter = 0;
   function addItem(){
+    itemCounter++;
     const frag = itemTemplate.content.cloneNode(true);
+    // Radios need a unique, shared `name` per item block to actually behave
+    // as a mutually-exclusive pair — without one, "PDF" and "Framed" are two
+    // independent checkboxes, and picking one never unpicks the other.
+    frag.querySelectorAll('.f-product').forEach(r => { r.name = 'product-' + itemCounter; });
     itemsContainer.appendChild(frag);
     refreshItemChrome();
     updateSummary();
