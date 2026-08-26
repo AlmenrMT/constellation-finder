@@ -32,26 +32,19 @@
   section h2{ font-size:24px; margin:0 0 8px; }
   section p.section-lead{ color:var(--muted); margin:0 0 28px; max-width:640px; }
 
-  .steps{ display:grid; grid-template-columns:repeat(3,1fr); gap:20px; }
-  @media (max-width:760px){ .steps{ grid-template-columns:1fr; } }
-  .step{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:20px; }
-  .step .num{ display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:var(--accent); color:var(--accent-ink); font-weight:700; font-size:13px; margin-bottom:12px; }
-  .step h3{ font-size:16px; margin:0 0 6px; }
-  .step p{ color:var(--muted); font-size:14px; margin:0; }
-
-  .app-mock{ background:#000; border:1px solid var(--border); border-radius:14px; padding:22px; max-width:340px; }
-  .app-mock .title{ font-weight:800; font-size:18px; margin:0 0 2px; }
-  .app-mock .sub{ color:var(--muted); font-size:12px; margin:0 0 16px; }
-  .app-mock .star-row{ border-top:1px solid var(--border); padding:10px 0; }
-  .app-mock .star-row:first-of-type{ border-top:none; }
-  .app-mock .star-row b{ font-size:13px; }
-  .app-mock .star-row div{ color:var(--muted); font-size:11px; margin-top:2px; }
-  .app-mock .go{ margin-top:14px; display:block; text-align:center; background:var(--accent); color:var(--accent-ink); font-weight:700; font-size:13px; padding:10px; border-radius:8px; }
-  .why-grid{ display:grid; grid-template-columns:1fr 1fr; gap:28px; align-items:center; }
-  @media (max-width:760px){ .why-grid{ grid-template-columns:1fr; } }
-  .why-grid ul{ padding-left:0; list-style:none; margin:0; }
-  .why-grid li{ display:flex; gap:10px; margin-bottom:14px; font-size:15px; }
-  .why-grid li .tick{ color:var(--good); flex-shrink:0; }
+  .how-steps{ display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+  @media (max-width:760px){ .how-steps{ grid-template-columns:1fr; } }
+  .how-step{ background:var(--panel); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+  .how-step-img{ aspect-ratio:4/3; background:#000; }
+  .how-step-img img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .how-step-body{ padding:20px; }
+  .how-step .num{ display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:var(--accent); color:var(--accent-ink); font-weight:700; font-size:13px; margin-bottom:12px; }
+  .how-step h3{ font-size:16px; margin:0 0 6px; }
+  .how-step p{ color:var(--muted); font-size:14px; margin:0; }
+  .how-step ul{ padding-left:0; list-style:none; margin:0; }
+  .how-step li{ display:flex; gap:8px; color:var(--muted); font-size:14px; margin-bottom:8px; }
+  .how-step li:last-child{ margin-bottom:0; }
+  .how-step li .tick{ color:var(--good); flex-shrink:0; }
 
   form.order{ background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:28px; max-width:560px; }
   .field{ margin-bottom:18px; }
@@ -130,49 +123,44 @@
 
   <section>
     <h2>How it works</h2>
-    <p class="section-lead">Three steps, no astronomy degree required.</p>
-    <div class="steps">
-      <div class="step">
-        <div class="num">1</div>
-        <h3>You send a photo</h3>
-        <p>A portrait, a pet, a skyline — anything with a clear outline works well as a line drawing.</p>
-      </div>
-      <div class="step">
-        <div class="num">2</div>
-        <h3>We place it in the sky</h3>
-        <p>The outline is matched to real stars in your chosen hemisphere, so every line on the poster is a real star in the real sky.</p>
-      </div>
-      <div class="step">
-        <div class="num">3</div>
-        <h3>Your poster arrives</h3>
-        <p>As a print-ready PDF, or a framed print delivered to your door — with a QR code linking to the free app.</p>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="why-grid">
-      <div>
-        <h2>Not just a poster</h2>
-        <p class="section-lead">Every poster includes a QR code to our free companion app.</p>
-        <ul>
-          <li><span class="tick">✓</span> Point your phone at the sky and it guides you straight to the constellation</li>
-          <li><span class="tick">✓</span> See real facts about each star it's built from — distance, type, what makes it interesting</li>
-          <li><span class="tick">✓</span> Works anywhere the constellation is above the horizon, any night</li>
-        </ul>
-      </div>
-      <div class="app-mock">
-        <div class="title">Aquarius, Capricornus</div>
-        <div class="sub">7 stars · Jonas.json</div>
-        <div class="star-row">
-          <b>Iot Aqr</b>
-          <div>Apparent magnitude 4.29 — faint, visible to the naked eye in dark skies.</div>
+    <p class="section-lead">From photo to real night sky, in four steps.</p>
+    <div class="how-steps">
+      <div class="how-step">
+        <div class="how-step-img"><img src="assets/how-it-works-1-photo.jpg" alt="An original photo of a smiling girl, used as the starting point for a poster"></div>
+        <div class="how-step-body">
+          <div class="num">1</div>
+          <h3>Upload a photo</h3>
+          <p>A portrait, a pet, a skyline — anything with a clear outline works well as a line drawing.</p>
         </div>
-        <div class="star-row">
-          <b>Ome Cap</b>
-          <div>Apparent magnitude 4.12 — faint, visible to the naked eye in dark skies.</div>
+      </div>
+      <div class="how-step">
+        <div class="how-step-img"><img src="assets/how-it-works-2-outline.jpg" alt="A line-drawing outline traced from the photo"></div>
+        <div class="how-step-body">
+          <div class="num">2</div>
+          <h3>Outline</h3>
+          <p>We create an outline based on your image.</p>
         </div>
-        <div class="go">Start finding it →</div>
+      </div>
+      <div class="how-step">
+        <div class="how-step-img"><img src="assets/how-it-works-3-poster.jpg" alt="The finished poster, with the outline connected to real stars in the night sky"></div>
+        <div class="how-step-body">
+          <div class="num">3</div>
+          <h3>Poster</h3>
+          <p>The outline is matched to real stars in your chosen hemisphere, so every line on the poster is a real star in the real sky — delivered as a print-ready PDF, or a framed print to your door.</p>
+        </div>
+      </div>
+      <div class="how-step">
+        <div class="how-step-img"><img src="assets/how-it-works-4-app.jpg" alt="The free companion app pointing at the sky to guide you to the constellation"></div>
+        <div class="how-step-body">
+          <div class="num">4</div>
+          <h3>See your constellation live</h3>
+          <ul>
+            <li><span class="tick">✓</span> Use the QR code on the poster to access our free app</li>
+            <li><span class="tick">✓</span> Point your phone at the sky and it guides you straight to the constellation</li>
+            <li><span class="tick">✓</span> See real facts about each star it's built from — distance, type, what makes it interesting</li>
+            <li><span class="tick">✓</span> Works anywhere the constellation is above the horizon, any night</li>
+          </ul>
+        </div>
       </div>
     </div>
   </section>
