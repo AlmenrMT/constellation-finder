@@ -250,7 +250,7 @@
           <option value="Northern">Northern hemisphere</option>
           <option value="Southern">Southern hemisphere</option>
         </select>
-        <div class="hint">Whichever hemisphere you'll actually be standing under to find it.</div>
+        <div class="hint f-hemisphere-hint">Whichever hemisphere you'll actually be standing under to find it.</div>
       </div>
       <div class="field">
         <label>Poster format</label>
@@ -264,7 +264,7 @@
             </div>
           </label>
           <label class="radio-card">
-            <input type="radio" class="f-product" value="framed">
+            <input type="radio" class="f-product" value="framed" checked>
             <div class="card-inner">
               <div class="name">Framed poster</div>
               <div class="price">$40 / €40 + shipping</div>
@@ -338,7 +338,32 @@
     frag.querySelectorAll('.f-product').forEach(r => { r.name = 'product-' + itemCounter; });
     itemsContainer.appendChild(frag);
     refreshItemChrome();
+    applyGeoHemisphereDefault(itemBlocks()[itemBlocks().length - 1]);
     updateSummary();
+  }
+
+  // Best-effort only: a default guess, never trusted for anything beyond
+  // pre-filling the dropdown, and only ever used locally in the browser —
+  // nothing about the visitor's location is sent anywhere.
+  let geoHemisphere = null;
+  function detectHemisphereFromLocation(){
+    if(!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        geoHemisphere = pos.coords.latitude >= 0 ? 'Northern' : 'Southern';
+        itemBlocks().forEach(applyGeoHemisphereDefault);
+      },
+      () => {}, // denied, unavailable, or timed out — just leave it to the customer
+      { timeout: 8000, maximumAge: 600000 }
+    );
+  }
+  function applyGeoHemisphereDefault(block){
+    if(!geoHemisphere || !block) return;
+    const sel = block.querySelector('.f-hemisphere');
+    if(sel.dataset.userChanged || sel.value) return;
+    sel.value = geoHemisphere;
+    block.querySelector('.f-hemisphere-hint').textContent =
+      'Guessed from your location — change it if that\'s not where you\'ll actually be standing.';
   }
 
   function refreshItemChrome(){
@@ -359,6 +384,7 @@
   });
   itemsContainer.addEventListener('change', e => {
     if(e.target.classList.contains('f-product')) updateSummary();
+    if(e.target.classList.contains('f-hemisphere')) e.target.dataset.userChanged = '1';
   });
   itemsContainer.addEventListener('input', e => {
     if(e.target.classList.contains('f-title')) updateSummary();
@@ -435,6 +461,7 @@
   }
 
   addItem();
+  detectHemisphereFromLocation();
 
   function fileToResizedBlob(file, maxDim){
     return new Promise((resolve, reject) => {

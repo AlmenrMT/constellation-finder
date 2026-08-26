@@ -182,6 +182,12 @@
       <div class="hint">Local time zone offset: <input type="number" id="manTz" step="0.5" value="2" style="width:60px; display:inline-block;"> hours from UTC</div>
     </div>
     <div class="hint" id="sensorStatus" style="margin-top:14px;"></div>
+
+    <h2 style="margin-top:20px;">Best time to view</h2>
+    <p class="hint">Finds the next week's darkest, highest-in-the-sky windows for this constellation, and checks the cloud forecast for each.</p>
+    <button id="findBestTimeBtn" style="width:100%;">🔭 Find best time to view</button>
+    <div id="bestTimeResults"></div>
+
     <button id="loadAnotherBtn" style="width:100%; margin-top:16px;">Load a different map</button>
   </div>
 </div>
@@ -614,6 +620,88 @@
     return raDecToAltAz(sun.ra, sun.dec, lat, lon, jd).alt <= NIGHT_SUN_ALT_MAX;
   }
 
+  // ---------- "best time to view" — scans the next week for dark, high-in-the-sky windows ----------
+  function julianDateFromDate(d){
+    return julianDate(d.getUTCFullYear(), d.getUTCMonth()+1, d.getUTCDate(), d.getUTCHours()+d.getUTCMinutes()/60+d.getUTCSeconds()/3600);
+  }
+  const MIN_GOOD_ALT = 15; // below this, horizon haze/rooftops/trees usually ruin the view anyway
+
+  function scanUpcomingWindows(days){
+    const stepMinutes = 15;
+    const now = new Date();
+    const samples = [];
+    for(let m = 0; m <= days*24*60; m += stepMinutes){
+      const t = new Date(now.getTime() + m*60000);
+      const jd = julianDateFromDate(t);
+      const sun = sunRaDec(jd);
+      if(raDecToAltAz(sun.ra, sun.dec, lat, lon, jd).alt > NIGHT_SUN_ALT_MAX) continue; // not dark
+      const { alt } = meanTargetAltAz(jd);
+      if(alt < MIN_GOOD_ALT) continue; // too low to bother with
+      samples.push({ t, alt });
+    }
+    if(!samples.length) return [];
+
+    // Group consecutive dark+visible samples into windows, gaps end a window.
+    const windows = [];
+    let current = null;
+    for(const s of samples){
+      if(current && (s.t - current[current.length-1].t) <= stepMinutes*1.5*60000){
+        current.push(s);
+      }else{
+        current = [s];
+        windows.push(current);
+      }
+    }
+
+    // One best window per calendar night (local date), so "tonight" and
+    // "tomorrow night" don't both show up as several near-duplicate entries.
+    const byNight = new Map();
+    for(const w of windows){
+      const peak = w.reduce((best, s) => s.alt > best.alt ? s : best, w[0]);
+      const key = peak.t.toDateString();
+      const entry = { start: w[0].t, end: w[w.length-1].t, peakTime: peak.t, peakAlt: peak.alt };
+      if(!byNight.has(key) || byNight.get(key).peakAlt < entry.peakAlt) byNight.set(key, entry);
+    }
+    return [...byNight.values()].sort((a,b) => a.peakTime - b.peakTime);
+  }
+
+  // Best-effort and entirely optional: Open-Meteo needs no API key and is
+  // free for this volume of use. If it fails for any reason (offline, rate
+  // limited, API shape changes), the recommendation still works from
+  // altitude alone — this just refines it when available.
+  async function fetchCloudCoverForecast(days){
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=cloud_cover&forecast_days=${days}&timezone=UTC`;
+    const resp = await fetch(url);
+    if(!resp.ok) throw new Error('weather forecast unavailable');
+    const data = await resp.json();
+    const hourly = data.hourly.cloud_cover ? data : { hourly: { time: data.hourly.time, cloud_cover: data.hourly.cloudcover } };
+    const byHour = new Map();
+    hourly.hourly.time.forEach((iso, i) => byHour.set(iso.slice(0,13), hourly.hourly.cloud_cover[i]));
+    return byHour;
+  }
+  function cloudCoverNear(byHour, date){
+    const v = byHour.get(date.toISOString().slice(0,13));
+    return typeof v === 'number' ? v : null;
+  }
+
+  async function findBestViewingTimes(days){
+    const nightly = scanUpcomingWindows(days);
+    if(!nightly.length) return nightly;
+    try{
+      // +1 day of buffer: Open-Meteo's forecast_days window doesn't line up
+      // exactly with "now + N*24h", so the scan's last night can otherwise
+      // fall just past the edge of the returned hourly data.
+      const cloudByHour = await fetchCloudCoverForecast(days + 1);
+      nightly.forEach(r => { r.cloudCover = cloudCoverNear(cloudByHour, r.peakTime); });
+    }catch(err){
+      nightly.forEach(r => { r.cloudCover = null; });
+    }
+    // Altitude is the primary signal; cloud cover (0-100%) is a moderate
+    // tiebreaker so a much higher, slightly-cloudier night can still win.
+    nightly.forEach(r => { r.score = r.peakAlt - (r.cloudCover ?? 0) * 0.5; });
+    return [...nightly].sort((a,b) => b.score - a.score);
+  }
+
   // A lit room reads as bright in the live camera feed the same way a real
   // night sky never does — sampled from the actual passthrough video, since
   // there's no ambient-light-sensor API available in the browser. Approximate
@@ -782,6 +870,57 @@
   document.getElementById('showDrawing').addEventListener('change', scheduleRender);
   document.getElementById('gearBtn').addEventListener('click', () => { document.getElementById('settingsPanel').style.display='block'; });
   document.getElementById('closeSettingsBtn').addEventListener('click', () => { document.getElementById('settingsPanel').style.display='none'; });
+
+  document.getElementById('findBestTimeBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('findBestTimeBtn');
+    const resultsEl = document.getElementById('bestTimeResults');
+    btn.disabled = true;
+    resultsEl.innerHTML = '<div class="hint" style="margin-top:12px;">Scanning the next week…</div>';
+    try{
+      const results = await findBestViewingTimes(7);
+      renderBestTimeResults(results);
+    }catch(err){
+      resultsEl.innerHTML = `<div class="hint" style="margin-top:12px;color:#ff8a8a;">Could not compute this: ${err.message}</div>`;
+    }finally{
+      btn.disabled = false;
+    }
+  });
+
+  function renderBestTimeResults(results){
+    const resultsEl = document.getElementById('bestTimeResults');
+    if(!results.length){
+      resultsEl.innerHTML = '<div class="hint" style="margin-top:12px;">Doesn\'t get high enough in a dark sky from your location in the next week.</div>';
+      return;
+    }
+    const fmtTime = d => d.toLocaleString(undefined, { weekday:'short', hour:'numeric', minute:'2-digit' });
+    const dayLabel = d => {
+      const days = Math.round((new Date(d.toDateString()) - new Date(new Date().toDateString())) / 86400000);
+      if(days === 0) return 'Tonight';
+      if(days === 1) return 'Tomorrow night';
+      return d.toLocaleDateString(undefined, { weekday:'long' });
+    };
+    const cloudText = r => r.cloudCover == null ? '' : ` · ${Math.round(r.cloudCover)}% cloud`;
+    const top = results[0];
+    const rest = results.slice(1, 4);
+    resultsEl.innerHTML = `
+      <div style="background:rgba(110,168,254,0.12); border:1px solid var(--accent); border-radius:10px; padding:12px; margin-top:12px;">
+        <div style="font-weight:700;">${dayLabel(top.peakTime)}, around ${fmtTime(top.peakTime)}</div>
+        <div class="hint" style="margin:4px 0 0;">Reaches ${Math.round(top.peakAlt)}° above the horizon${cloudText(top)}.</div>
+      </div>
+      ${rest.length ? `<div class="hint" style="margin-top:10px;">Other good nights: ${rest.map(r => `${dayLabel(r.peakTime)} (${Math.round(r.peakAlt)}°${cloudText(r)})`).join(' · ')}</div>` : ''}
+    `;
+  }
+
+  // Contextual shortcut: when the AR view says it's below the horizon, offer
+  // a one-click way straight to the same search instead of making the
+  // visitor go find it in Settings themselves.
+  document.getElementById('guidePanel').addEventListener('click', (e) => {
+    if(e.target && e.target.id === 'findBestTimeLink'){
+      e.preventDefault();
+      document.getElementById('settingsPanel').style.display = 'block';
+      document.getElementById('findBestTimeBtn').click();
+    }
+  });
   document.getElementById('fovVal').textContent = fovH+'°';
   document.getElementById('drawOpacityVal').textContent = '0.80';
   document.getElementById('manHeadingVal').textContent = '0°';
@@ -797,12 +936,18 @@
   }
 
   // ---------- periodic astronomy refresh (slow — star positions barely move) ----------
+  // Shared by the live view and the "best time to view" search below — the
+  // mean alt/az across all of the constellation's stars at any given jd.
+  function meanTargetAltAz(jd){
+    const altAz = map.stars.map(s => raDecToAltAz(s.ra, s.dec, lat, lon, jd));
+    return { az: circularMeanDeg(altAz.map(a=>a.az)), alt: altAz.reduce((a,s)=>a+s.alt,0)/altAz.length };
+  }
+
   function refreshAstro(){
     if(!map) return;
     const jd = manualMode ? currentManualJulianDate() : nowJulianDate();
     starsAltAz = map.stars.map(s => ({ ...s, ...raDecToAltAz(s.ra, s.dec, lat, lon, jd) }));
-    const az = circularMeanDeg(starsAltAz.map(s=>s.az));
-    const alt = starsAltAz.reduce((a,s)=>a+s.alt,0)/starsAltAz.length;
+    const { az, alt } = meanTargetAltAz(jd);
     targetAltAz = { az, alt };
     populateGridAltAz(jd);
     buildDrawingSprite();
@@ -918,7 +1063,7 @@
 
     if(target.alt < -2){
       document.getElementById('guideText').textContent = "It's below the horizon right now";
-      document.getElementById('guideSub').textContent = 'Try again later, or pick a different time in Settings.';
+      document.getElementById('guideSub').innerHTML = 'Try again later, or <a href="#" id="findBestTimeLink" style="color:var(--accent);">find the best time to see it</a>.';
     } else if(inView){
       document.getElementById('guideText').textContent = '✓ In view — look at your screen';
       document.getElementById('guideSub').textContent = 'Hold steady and match the stars to the real sky.';
