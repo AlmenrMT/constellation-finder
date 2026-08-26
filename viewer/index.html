@@ -6,6 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <script src="starinfo.js"></script>
 <script src="dsoinfo.js"></script>
+<script src="constellationart.js"></script>
 <style>
   :root{
     --bg:#0b0d12; --panel:#1a1d24; --border:#333844; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe; --good:#5ee08a; --warn:#ffb04a;
@@ -59,6 +60,10 @@
     padding:16px 16px calc(16px + env(safe-area-inset-bottom)) 16px; padding-top:calc(16px + env(safe-area-inset-top));
   }
   #infoPanel h2{ font-size:16px; margin:0 0 10px; }
+  .artCards{ display:flex; gap:10px; overflow-x:auto; margin:10px 0 16px; padding-bottom:4px; }
+  .artCard{ flex:0 0 auto; width:150px; }
+  .artCard img{ width:150px; height:150px; object-fit:cover; border-radius:8px; background:var(--panel); display:block; }
+  .artCard .cap{ font-size:10px; color:var(--muted); margin-top:4px; line-height:1.3; }
 
   /* ---- AR screen ---- */
   #arScreen{ position:fixed; inset:0; display:none; background:#000; }
@@ -208,6 +213,7 @@
 
     <h2 style="margin-top:24px;">The stars in this portrait</h2>
     <p class="hint" id="infoConstellations"></p>
+    <div id="infoArt"></div>
     <div class="starList" id="infoStars"></div>
 
     <h2 style="margin-top:24px;">Other notable stars nearby</h2>
@@ -447,6 +453,15 @@
     const cons = [...new Set(map.stars.map(s=>s.constellation))];
     document.getElementById('infoConstellations').textContent =
       `This portrait spans part of ${cons.length > 1 ? 'the official constellations' : 'the official constellation'} ${cons.join(', ')}.`;
+
+    const artEl = document.getElementById('infoArt');
+    const artEntries = cons.map(c => ({ c, art: window.CONSTELLATION_ART && window.CONSTELLATION_ART[c] })).filter(e => e.art);
+    artEl.innerHTML = artEntries.length ? `<div class="artCards">${artEntries.map(({c, art}) => `
+      <div class="artCard">
+        <img src="${escapeHtml(art.url)}" alt="Traditional depiction of ${escapeHtml(c)}" loading="lazy">
+        <div class="cap"><b>${escapeHtml(c)}</b><br>${escapeHtml(art.source)} · public domain</div>
+      </div>
+    `).join('')}</div>` : '';
 
     const namedField = (map.fieldStars || []).filter(f => f[3]).sort((a,b) => a[2]-b[2]).slice(0, 8);
     const fieldEl = document.getElementById('infoFieldStars');
