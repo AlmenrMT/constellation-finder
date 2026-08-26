@@ -1031,12 +1031,18 @@
   // ---------- sky-projection & similarity-transform matching ----------
   function degToRad(d){ return d*Math.PI/180; }
 
+  // x is negated relative to the textbook gnomonic formula: raw "RA increases
+  // -> +x" is only naked-eye-correct by coincidence of facing direction (see
+  // toPixel below, and the matching negation in the search worker's copy) —
+  // negating here makes +x true "sky right" always, so every consumer (the
+  // matching search, the charts, the poster) gets a naked-eye-correct space
+  // for free instead of each needing its own display-time correction.
   function gnomonic(ra, dec, ra0, dec0){
     const raR=degToRad(ra), decR=degToRad(dec), ra0R=degToRad(ra0), dec0R=degToRad(dec0);
     const cosc = Math.sin(dec0R)*Math.sin(decR) + Math.cos(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R);
     if(cosc<=0.01) return null;
     return {
-      x: Math.cos(decR)*Math.sin(raR-ra0R)/cosc,
+      x: -Math.cos(decR)*Math.sin(raR-ra0R)/cosc,
       y: (Math.cos(dec0R)*Math.sin(decR) - Math.sin(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R))/cosc,
     };
   }
@@ -1044,6 +1050,11 @@
   // Fits scale + translation ONLY — no rotation, no mirroring — so the matched
   // stars (and anything else, like the source drawing, transformed the same
   // way) keep the exact orientation and handedness the dots were drawn in.
+  // Because gnomonic() above is already naked-eye-correct, this handedness
+  // preservation now means the final display matches the drawing AND the
+  // real sky at once — before gnomonic() was corrected, those two could not
+  // both be true (fixed 2026-08 after matched-stars/detected-points mismatch
+  // was reported).
   // (sIm is kept at 0 so this still uses the same {sRe,sIm,tx,ty} shape as a
   // full similarity transform — applyTransform/applyInverseTransform work unchanged.)
   // fitScaleTranslate/applyTransform/centerAndScale/greedyAssign/
@@ -1061,8 +1072,11 @@
     return { x: (dx*fit.sRe + dy*fit.sIm)/denom, y: (dy*fit.sRe - dx*fit.sIm)/denom };
   }
 
-  // Inverse gnomonic (deprojection): a tangent-plane point back to (ra,dec) degrees.
+  // Inverse gnomonic (deprojection): a tangent-plane point back to (ra,dec)
+  // degrees. x is negated on the way in to undo gnomonic()'s own negation
+  // above, keeping the two exact inverses of each other.
   function inverseGnomonic(x, y, ra0, dec0){
+    x = -x;
     const ra0R=degToRad(ra0), dec0R=degToRad(dec0);
     const rho = Math.hypot(x,y);
     if(rho < 1e-12) return { ra: ra0, dec: dec0 };
@@ -1086,12 +1100,15 @@
   // everything else in this file is unchanged.
   const STAR_SEARCH_WORKER_SRC = `
     function degToRad(d){ return d*Math.PI/180; }
+    // x negated — must stay identical to the main thread's gnomonic() (see
+    // its comment) since this candidate space is fit directly against the
+    // detected drawing points (see targetPts below).
     function gnomonic(ra, dec, ra0, dec0){
       const raR=degToRad(ra), decR=degToRad(dec), ra0R=degToRad(ra0), dec0R=degToRad(dec0);
       const cosc = Math.sin(dec0R)*Math.sin(decR) + Math.cos(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R);
       if(cosc<=0.01) return null;
       return {
-        x: Math.cos(decR)*Math.sin(raR-ra0R)/cosc,
+        x: -Math.cos(decR)*Math.sin(raR-ra0R)/cosc,
         y: (Math.cos(dec0R)*Math.sin(decR) - Math.sin(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R))/cosc,
       };
     }
@@ -1408,13 +1425,9 @@
     const W = size, H = size;
     const scale = Math.min(W/(viewMaxX-viewMinX), H/(viewMaxY-viewMinY)) * 0.9;
     const ccx = (viewMinX+viewMaxX)/2, ccy=(viewMinY+viewMaxY)/2;
-    // x is negated: a flat RA/Dec gnomonic chart with "RA increases -> screen
-    // right" only matches the real sky by coincidence of which way you're
-    // facing — it isn't the naked-eye orientation. The "where to look" chart
-    // (built from actual az/heading, see toLocal below) IS grounded in real
-    // compass geometry, so this chart is negated to agree with it and with
-    // how the constellation truly appears when you find it in the sky.
-    function toPixel(p){ return { x: W/2 - (p.x-ccx)*scale, y: H/2 - (p.y-ccy)*scale }; }
+    // gnomonic() already returns naked-eye-correct x (see its own comment),
+    // so this is a plain scale — no extra sign flip needed here.
+    function toPixel(p){ return { x: W/2 + (p.x-ccx)*scale, y: H/2 - (p.y-ccy)*scale }; }
 
     // ---- field stars (context) ----
     const field = window.FIELD_STARS || [];
@@ -1867,10 +1880,9 @@
 
     const scale = Math.min(W/(viewMaxX-viewMinX), skyH/(viewMaxY-viewMinY)) * 0.98;
     const ccx=(viewMinX+viewMaxX)/2, ccy=(viewMinY+viewMaxY)/2;
-    // x negated — see the matching comment in buildSkyChartSvg's toPixel:
-    // this keeps the printed poster oriented the way the constellation
-    // actually appears in the real sky, not mirrored from it.
-    function toPixel(p){ return { x: W/2 - (p.x-ccx)*scale, y: skyTop + skyH/2 - (p.y-ccy)*scale }; }
+    // gnomonic() already returns naked-eye-correct x (see its own comment),
+    // so this is a plain scale — no extra sign flip needed here.
+    function toPixel(p){ return { x: W/2 + (p.x-ccx)*scale, y: skyTop + skyH/2 - (p.y-ccy)*scale }; }
 
     const halfWDeg = Math.atan(Math.max(Math.abs(viewMinX),Math.abs(viewMaxX)))*180/Math.PI / Math.max(0.15, Math.cos(degToRad(cdec)));
     const halfHDeg = Math.atan(Math.max(Math.abs(viewMinY),Math.abs(viewMaxY)))*180/Math.PI;

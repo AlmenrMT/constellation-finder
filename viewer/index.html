@@ -267,16 +267,25 @@
     if(Math.sin(haR) > 0) az = 2*Math.PI - az;
     return { alt: radToDeg(alt), az: radToDeg(az) };
   }
+  // x is negated relative to the textbook gnomonic formula — see the matching
+  // comment in constellation-finder's gnomonic(): raw "RA increases -> +x" is
+  // only naked-eye-correct by coincidence of facing direction, so this is
+  // negated to make +x true "sky right" always. Must stay identical to
+  // finder's gnomonic(), since saved maps' projection.fit was computed
+  // against it.
   function gnomonic(ra, dec, ra0, dec0){
     const raR=degToRad(ra), decR=degToRad(dec), ra0R=degToRad(ra0), dec0R=degToRad(dec0);
     const cosc = Math.sin(dec0R)*Math.sin(decR) + Math.cos(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R);
     if(cosc<=0.01) return null;
     return {
-      x: Math.cos(decR)*Math.sin(raR-ra0R)/cosc,
+      x: -Math.cos(decR)*Math.sin(raR-ra0R)/cosc,
       y: (Math.cos(dec0R)*Math.sin(decR) - Math.sin(dec0R)*Math.cos(decR)*Math.cos(raR-ra0R))/cosc,
     };
   }
+  // x negated on the way in to undo gnomonic()'s own negation above, keeping
+  // the two exact inverses of each other.
   function inverseGnomonic(x, y, ra0, dec0){
+    x = -x;
     const ra0R=degToRad(ra0), dec0R=degToRad(dec0);
     const rho = Math.hypot(x,y);
     if(rho < 1e-12) return { ra: ra0, dec: dec0 };
@@ -486,13 +495,10 @@
   let skyMapState = null;
   const SKY_MAP_MIN_ZOOM = 0.6, SKY_MAP_MAX_ZOOM = 6, SKY_MAP_MAX_PAN_FRAC = 0.45;
 
-  // x is negated: raw gnomonic x ("RA increases -> right") only matches the
-  // real sky by coincidence of facing direction — it's not the naked-eye
-  // orientation. Negating it agrees with the AR view here (built from real
-  // az/heading, physically grounded) and with the poster (same fix applied
-  // in constellation-finder's chart/poster toPixel).
+  // gnomonic() already returns naked-eye-correct x (see its own comment), so
+  // this is a plain scale — no extra sign flip needed here.
   function gnomonicToPixel(g, s, W, H){
-    return { x: W/2 - g.x*s.scale + s.offsetX, y: H/2 - g.y*s.scale + s.offsetY };
+    return { x: W/2 + g.x*s.scale + s.offsetX, y: H/2 - g.y*s.scale + s.offsetY };
   }
 
   function buildSkyMap(){
