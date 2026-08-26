@@ -114,12 +114,6 @@
     <div class="btnrow">
       <button class="primary" id="publishBtn">Publish in Viewer</button>
     </div>
-    <div id="ghTokenRow" style="margin-top:8px;">
-      <label style="margin-top:0;">GitHub token <span style="color:var(--muted); font-weight:400;">(saved in this browser only, used only to talk to api.github.com)</span></label>
-      <input type="password" id="ghTokenInput" placeholder="fine-grained token, Contents: read/write on this repo" style="width:100%; background:#1f2024; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px;">
-      <div class="btnrow"><button id="ghTokenSaveBtn">Save token</button></div>
-    </div>
-    <p class="hint" id="ghTokenChangeHint" style="display:none; margin:6px 0 0;"><a href="#" id="ghTokenChangeLink" style="color:var(--accent);">Change GitHub token</a></p>
     <div class="stats" id="publishStatus"></div>
     <div class="btnrow">
       <button id="posterBtn">Create poster…</button>
@@ -2327,76 +2321,28 @@
     URL.revokeObjectURL(a.href);
   });
 
-  // ---------- publish to the shared viewer (GitHub Contents API) ----------
-  // This app has no backend — it's a static page, and so is the viewer. The
-  // only way a button here can make a map "live" for anyone else is to
-  // commit it straight into the repo behind GitHub Pages, using a token the
-  // user provides and that stays in their own browser's localStorage. Never
-  // sent anywhere except api.github.com.
-  const GH_OWNER = 'AlmenrMT', GH_REPO = 'constellation-finder', GH_BRANCH = 'main';
-  const GH_TOKEN_KEY = 'constellationFinderGhToken';
-  const ghTokenRow = document.getElementById('ghTokenRow');
-  const ghTokenChangeHint = document.getElementById('ghTokenChangeHint');
+  // ---------- publish to the shared viewer (server-side, via Supabase Edge
+  // Function) ----------
+  // This app has no backend of its own — it's a static page, and so is the
+  // viewer. Making a map "live" means committing it into the repo behind
+  // GitHub Pages, which needs a repo-write token. That token lives only in
+  // the publish-constellation Edge Function's secrets (never in this page or
+  // any browser's storage) so publishing works the same way regardless of
+  // which device/browser triggers it — including the admin.html auto-generate
+  // pipeline's hidden iframe, which used to silently skip this step on any
+  // browser that hadn't separately had a token pasted into it (see
+  // saveToOrder() below for the same call on that path).
   const publishStatus = document.getElementById('publishStatus');
 
-  function ghToken(){ return localStorage.getItem(GH_TOKEN_KEY) || ''; }
-  function refreshGhTokenUi(){
-    const has = !!ghToken();
-    ghTokenRow.style.display = has ? 'none' : '';
-    ghTokenChangeHint.style.display = has ? '' : 'none';
-  }
-  refreshGhTokenUi();
-
-  document.getElementById('ghTokenSaveBtn').addEventListener('click', () => {
-    const v = document.getElementById('ghTokenInput').value.trim();
-    if(!v) return;
-    localStorage.setItem(GH_TOKEN_KEY, v);
-    document.getElementById('ghTokenInput').value = '';
-    refreshGhTokenUi();
-    publishStatus.textContent = 'Token saved. Click Publish in Viewer again.';
-  });
-  document.getElementById('ghTokenChangeLink').addEventListener('click', e => {
-    e.preventDefault();
-    ghTokenRow.style.display = '';
-    ghTokenChangeHint.style.display = 'none';
-  });
-
-  // UTF-8-safe base64 (btoa alone only handles Latin1) — matches the inverse
-  // decode below.
-  function utf8ToBase64(str){ return btoa(unescape(encodeURIComponent(str))); }
-  function base64ToUtf8(b64){ return decodeURIComponent(escape(atob(b64.replace(/\n/g,'')))); }
-
-  async function ghGetFile(path){
-    const resp = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}?ref=${GH_BRANCH}`, {
-      headers: { Authorization: `Bearer ${ghToken()}`, Accept: 'application/vnd.github+json' },
+  async function publishConstellation(id, name, mapData){
+    const { data, error } = await supabaseOrders.functions.invoke('publish-constellation', {
+      body: { constellationId: id, name, mapData },
     });
-    if(resp.status === 404) return null;
-    if(!resp.ok) throw new Error(`reading ${path} failed (HTTP ${resp.status})`);
-    const data = await resp.json();
-    return { sha: data.sha, content: base64ToUtf8(data.content) };
-  }
-  async function ghPutFile(path, contentStr, message, sha){
-    const body = { message, content: utf8ToBase64(contentStr), branch: GH_BRANCH };
-    if(sha) body.sha = sha;
-    const resp = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`, {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${ghToken()}`, Accept: 'application/vnd.github+json', 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if(!resp.ok){
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.message || `writing ${path} failed (HTTP ${resp.status})`);
-    }
-    return resp.json();
+    if(error) throw error;
+    if(!data?.ok) throw new Error(data?.error || 'Publish failed');
   }
 
   document.getElementById('publishBtn').addEventListener('click', async () => {
-    if(!ghToken()){
-      publishStatus.textContent = 'Enter your GitHub token below, then click Publish again.';
-      ghTokenRow.style.display = '';
-      document.getElementById('ghTokenInput').focus();
-      return;
-    }
     if(!lastMatchData){ publishStatus.textContent = 'Find a constellation match first.'; return; }
     if(!constellationId) constellationId = generateConstellationId();
     const name = document.getElementById('constellationName').value.trim() || 'Constellation';
@@ -2405,19 +2351,7 @@
 
     publishStatus.textContent = 'Publishing…';
     try{
-      const mapPath = `maps/${constellationId}.json`;
-      const existingMap = await ghGetFile(mapPath);
-      await ghPutFile(mapPath, JSON.stringify(lastMatchData, null, 2), `Publish constellation: ${name}`, existingMap?.sha);
-
-      const manifestPath = 'maps/manifest.json';
-      const manifestFile = await ghGetFile(manifestPath);
-      let list = [];
-      if(manifestFile){ try{ list = JSON.parse(manifestFile.content); }catch(err){ list = []; } }
-      const idx = list.findIndex(m => m.file === `${constellationId}.json`);
-      if(idx>=0) list[idx].name = name;
-      else list.push({ file: `${constellationId}.json`, name });
-      await ghPutFile(manifestPath, JSON.stringify(list, null, 2), `Add ${name} to manifest`, manifestFile?.sha);
-
+      await publishConstellation(constellationId, name, lastMatchData);
       const viewerLink = VIEWER_BASE_URL + '?map=' + encodeURIComponent('../maps/' + constellationId + '.json');
       publishStatus.innerHTML = `Published — live in about a minute at <a href="${viewerLink}" target="_blank" style="color:var(--accent);">${escapeXml(name)}</a>.`;
     }catch(err){
@@ -2645,26 +2579,28 @@
       .upload(base + 'constellation.json', jsonBlob, { contentType: 'application/json', upsert: true });
     if(jsonErr) throw jsonErr;
 
-    // Also publish the map JSON to the public maps/ folder (same mechanism
-    // as the manual "Publish in Viewer" button, minus the manifest.json
-    // update) so the poster's QR code — which always points at this stable
-    // constellationId — actually resolves for the customer. Silently skipped
-    // if no GitHub token has been saved; the admin can publish manually later.
-    if(ghToken()){
-      try{
-        const mapPath = `maps/${orderContext.constellationNo}.json`;
-        const existingMap = await ghGetFile(mapPath);
-        await ghPutFile(mapPath, JSON.stringify(lastMatchData, null, 2), `Publish constellation: ${orderContext.constellationNo}`, existingMap?.sha);
-      }catch(err){
-        // Non-fatal: the order's files are already saved to Supabase either way.
-        console.error('Auto-publish to viewer failed:', err);
-      }
+    // Also publish the map JSON to the public maps/ folder (via the
+    // publish-constellation Edge Function — see the comment above the manual
+    // "Publish in Viewer" button) so the poster's QR code — which always
+    // points at this stable constellationNo — actually resolves for the
+    // customer. Kept non-fatal to the order save itself (the poster/JSON are
+    // already safely in Supabase either way), but the failure is returned
+    // instead of only logged, so callers can actually tell the admin their
+    // customer's QR code won't work yet.
+    let publishError = null;
+    try{
+      await publishConstellation(orderContext.constellationNo, orderContext.constellationNo, lastMatchData);
+    }catch(err){
+      publishError = err.message || String(err);
+      console.error('Auto-publish to viewer failed:', err);
     }
 
     const { error: dbErr } = await supabaseOrders.from('constellations')
       .update({ poster_path: base + 'poster.pdf', viewer_json_path: base + 'constellation.json' })
       .eq('id', orderContext.rowId);
     if(dbErr) throw dbErr;
+
+    return { publishError };
   }
 
   const autoGenerate = new URLSearchParams(location.search).get('auto') === '1';
@@ -2710,9 +2646,14 @@
     }
     try{
       generatePoster();
-      await saveToOrder();
-      statusEl.textContent = 'Auto-generated and saved poster + constellation to order ' + orderContext.orderNo + '.';
-      notifyParent(true);
+      const { publishError } = await saveToOrder();
+      if(publishError){
+        statusEl.textContent = 'Auto-generated and saved order ' + orderContext.orderNo + ', but publishing to the viewer failed (' + publishError + ') — the poster\'s QR code won\'t work until this is retried.';
+        notifyParent(false, 'Saved, but viewer publish failed: ' + publishError);
+      }else{
+        statusEl.textContent = 'Auto-generated and saved poster + constellation to order ' + orderContext.orderNo + '.';
+        notifyParent(true);
+      }
     }catch(err){
       statusEl.textContent = 'Auto-generate failed: ' + (err.message || err);
       notifyParent(false, err.message || String(err));
@@ -2730,8 +2671,10 @@
     btn.disabled = true;
     statusEl.textContent = 'Saving…';
     try{
-      await saveToOrder();
-      statusEl.textContent = 'Saved poster + constellation to order ' + orderContext.orderNo + '.';
+      const { publishError } = await saveToOrder();
+      statusEl.textContent = publishError
+        ? 'Saved to order ' + orderContext.orderNo + ', but publishing to the viewer failed (' + publishError + ') — the poster\'s QR code won\'t work until this is retried.'
+        : 'Saved poster + constellation to order ' + orderContext.orderNo + '.';
     }catch(err){
       statusEl.textContent = (err && err.message === 'No order loaded') ? '' : 'Could not save: ' + (err.message || err);
     }finally{
