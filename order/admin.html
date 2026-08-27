@@ -23,8 +23,10 @@
   #loginError{ color:var(--bad); font-size:13px; margin-top:8px; display:none; }
 
   #app{ display:none; }
-  .topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+  .topbar{ display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; gap:12px; flex-wrap:wrap; }
   .topbar button{ background:var(--panel2); border:1px solid var(--border); color:var(--muted); padding:8px 14px; border-radius:8px; cursor:pointer; font-size:13px; }
+  .topbar-right{ display:flex; align-items:center; gap:10px; }
+  #statusFilter{ background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:8px 10px; border-radius:8px; font-size:13px; }
 
   .order-card{ background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:16px; }
   .order-head{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
@@ -61,7 +63,13 @@
       <h1>Poster orders</h1>
       <p class="lead">Update order status, and attach the line drawing / viewer file / poster as you produce each one.</p>
     </div>
-    <button id="logoutBtn">Sign out</button>
+    <div class="topbar-right">
+      <select id="statusFilter">
+        <option value="__all__">All statuses</option>
+        <option value="__active__">Active (hide Cancelled)</option>
+      </select>
+      <button id="logoutBtn">Sign out</button>
+    </div>
   </div>
   <div id="orderList"></div>
 </div>
@@ -83,6 +91,21 @@
   const loginPanel = document.getElementById('loginPanel');
   const app = document.getElementById('app');
   const orderList = document.getElementById('orderList');
+  const statusFilter = document.getElementById('statusFilter');
+  const STATUS_FILTER_KEY = 'posterAdminStatusFilter';
+
+  for(const s of STATUSES){
+    const opt = document.createElement('option');
+    opt.value = s; opt.textContent = s;
+    statusFilter.appendChild(opt);
+  }
+  statusFilter.value = localStorage.getItem(STATUS_FILTER_KEY) || '__active__';
+  statusFilter.addEventListener('change', () => {
+    localStorage.setItem(STATUS_FILTER_KEY, statusFilter.value);
+    renderOrderList();
+  });
+
+  let allOrders = [];
 
   async function checkSession(){
     const { data } = await supabase.auth.getSession();
@@ -115,10 +138,25 @@
       .order('created_at', { ascending: false });
 
     if(error){ orderList.innerHTML = '<div class="empty">Could not load orders: ' + error.message + '</div>'; return; }
-    if(!data.length){ orderList.innerHTML = '<div class="empty">No orders yet.</div>'; return; }
+    allOrders = data;
+    await renderOrderList();
+  }
+
+  async function renderOrderList(){
+    if(!allOrders.length){ orderList.innerHTML = '<div class="empty">No orders yet.</div>'; return; }
+
+    const filterValue = statusFilter.value;
+    const filtered = filterValue === '__all__' ? allOrders
+      : filterValue === '__active__' ? allOrders.filter(o => o.status !== 'Cancelled')
+      : allOrders.filter(o => o.status === filterValue);
+
+    if(!filtered.length){
+      orderList.innerHTML = `<div class="empty">No orders match this filter (${allOrders.length} total).</div>`;
+      return;
+    }
 
     orderList.innerHTML = '';
-    for(const order of data){
+    for(const order of filtered){
       orderList.appendChild(await renderOrderCard(order));
     }
   }
@@ -165,7 +203,12 @@
 
     card.querySelector('.status-select').addEventListener('change', async (e) => {
       const { error } = await supabase.from('orders').update({ status: e.target.value }).eq('id', order.id);
-      if(error) alert('Could not update status: ' + error.message);
+      if(error){ alert('Could not update status: ' + error.message); return; }
+      order.status = e.target.value;
+      if(statusFilter.value !== '__all__' && statusFilter.value !== order.status
+         && !(statusFilter.value === '__active__' && order.status !== 'Cancelled')){
+        renderOrderList();
+      }
     });
 
     const constellationsEl = card.querySelector('.constellations');
