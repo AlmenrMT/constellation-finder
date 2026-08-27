@@ -2589,7 +2589,11 @@
     // customer's QR code won't work yet.
     let publishError = null;
     try{
-      await publishConstellation(orderContext.constellationNo, orderContext.constellationNo, lastMatchData);
+      // Use lastMatchData's own name (from the constellation-name field,
+      // pre-filled from the order's title — see loadOrderFromSupabase) —
+      // NOT orderContext.constellationNo, which is the K-number id, not a
+      // display name.
+      await publishConstellation(orderContext.constellationNo, lastMatchData.name, lastMatchData);
     }catch(err){
       publishError = err.message || String(err);
       console.error('Auto-publish to viewer failed:', err);

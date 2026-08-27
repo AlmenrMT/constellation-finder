@@ -1,7 +1,7 @@
 {
   "schema": "constellation-map-v1",
   "id": "K3010",
-  "name": "K3010",
+  "name": "Hunter the Dog",
   "generatedAt": "2026-08-27T10:02:25.367Z",
   "howToRender": {
     "summary": "Everything needed to redraw this chart and re-align \"drawing\" with the stars, independent of this app.",
