@@ -2,5 +2,9 @@
   {
     "file": "K3009.json",
     "name": "Jonas"
+  },
+  {
+    "file": "EDGE_FN_TEST_DELETE_ME.json",
+    "name": "EdgeFnTest"
   }
 ]
