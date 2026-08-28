@@ -1354,9 +1354,14 @@
   // by default. Used for the map-file export so it's independent of whatever
   // zoom level the user happens to have the live chart set to.
   function computeDefaultViewBounds(matchedStars){
-    let cra=0, cdec=0;
-    for(const s of matchedStars){ cra+=s.ra; cdec+=s.dec; }
-    cra/=matchedStars.length; cdec/=matchedStars.length;
+    // RA wraps at 360° — a plain arithmetic mean can land the "center" on the
+    // opposite side of the sky from every matched star (e.g. stars at 359°
+    // and 1° average to 180°), which then makes gnomonic() return null for
+    // all of them (>90° away) and crash the .map(p=>p.x) below.
+    const cra = circularMeanDeg(matchedStars.map(s=>s.ra));
+    let cdec=0;
+    for(const s of matchedStars){ cdec+=s.dec; }
+    cdec/=matchedStars.length;
     const proj = matchedStars.map(s => gnomonic(s.ra, s.dec, cra, cdec));
     const xs=proj.map(p=>p.x), ys=proj.map(p=>p.y);
     const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
@@ -1397,9 +1402,11 @@
     constOpacity = constOpacity == null ? 1 : constOpacity;
     const pal = paletteFor(bg);
     const matchedStars = match.matchedStars;
-    let cra=0, cdec=0;
-    for(const s of matchedStars){ cra+=s.ra; cdec+=s.dec; }
-    cra/=matchedStars.length; cdec/=matchedStars.length;
+    // RA wraps at 360° — see the comment in computeDefaultViewBounds.
+    const cra = circularMeanDeg(matchedStars.map(s=>s.ra));
+    let cdec=0;
+    for(const s of matchedStars){ cdec+=s.dec; }
+    cdec/=matchedStars.length;
 
     const proj = matchedStars.map(s => gnomonic(s.ra, s.dec, cra, cdec));
     const xs = proj.map(p=>p.x), ys = proj.map(p=>p.y);
@@ -1853,9 +1860,11 @@
     // visibly distorted the layout, not just a clean rotation, and likely
     // explains the drawing silently failing to warp too). RA/Dec projection
     // has none of those edge cases.
-    let cra=0, cdec=0;
-    for(const s of stars){ cra+=s.ra; cdec+=s.dec; }
-    cra/=stars.length; cdec/=stars.length;
+    // RA wraps at 360° — see the comment in computeDefaultViewBounds.
+    const cra = circularMeanDeg(stars.map(s=>s.ra));
+    let cdec=0;
+    for(const s of stars){ cdec+=s.dec; }
+    cdec/=stars.length;
 
     const proj = stars.map(s => gnomonic(s.ra, s.dec, cra, cdec));
     const xs = proj.map(p=>p.x), ys = proj.map(p=>p.y);

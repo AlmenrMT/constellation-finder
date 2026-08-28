@@ -511,7 +511,11 @@
     skyMapCanvas.width = Math.max(1, Math.round(rect.width));
     skyMapCanvas.height = Math.max(1, Math.round(rect.height));
 
-    const centerRa = (map.projection && map.projection.tangentRa) ?? (map.stars.reduce((a,s)=>a+s.ra,0)/map.stars.length);
+    // RA wraps at 360° — a plain mean can land on the opposite side of the
+    // sky from every star (e.g. 359° and 1° averaging to 180°), so this
+    // fallback (only used if a map is missing its own projection) uses a
+    // circular mean instead.
+    const centerRa = (map.projection && map.projection.tangentRa) ?? circularMeanDeg(map.stars.map(s=>s.ra));
     const centerDec = (map.projection && map.projection.tangentDec) ?? (map.stars.reduce((a,s)=>a+s.dec,0)/map.stars.length);
 
     // gnomonic() legitimately returns null for anything too far from the
