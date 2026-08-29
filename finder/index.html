@@ -163,8 +163,8 @@
       constellation's unique ID in the viewer — publish it there first (see "Publish in Viewer")
       so scanning it actually resolves to something.
     </p>
-    <label>Constellation size <span class="val" id="posterZoomVal">1.25×</span></label>
-    <input type="range" id="posterZoom" min="0.4" max="3" step="0.05" value="1.25">
+    <label>Constellation size <span class="val" id="posterZoomVal">1.00×</span></label>
+    <input type="range" id="posterZoom" min="0.4" max="3" step="0.05" value="1">
     <div class="btnrow">
       <button class="primary" id="posterGenBtn">Generate</button>
     </div>
@@ -1870,23 +1870,36 @@
     const xs = proj.map(p=>p.x), ys = proj.map(p=>p.y);
     const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
     const spanX = Math.max(maxX-minX, 0.02), spanY = Math.max(maxY-minY, 0.02);
-    // The constellation is the subject of the poster — it should read as
-    // clearly prominent, not lost in a wide field of background sky. Modest,
-    // mostly-fixed padding (similar to the interactive chart's own framing),
-    // not the much wider margin an earlier version used.
-    const pad = (Math.max(spanX, spanY)*0.55 + 0.1) / zoomFactor;
-    const viewMinX=minX-pad, viewMaxX=maxX+pad, viewMinY=minY-pad, viewMaxY=maxY+pad;
+    const ccx = (minX+maxX)/2, ccy = (minY+maxY)/2;
 
     const W = 1000, H = 1400;
     const titleH = 150, skylineH = 210;
     const skyTop = titleH, skyH = H - titleH - skylineH;
 
-    const scale = Math.min(W/(viewMaxX-viewMinX), skyH/(viewMaxY-viewMinY)) * 0.98;
-    const ccx=(viewMinX+viewMaxX)/2, ccy=(viewMinY+viewMaxY)/2;
+    // The constellation is the subject of the poster — it should read as
+    // clearly prominent, not lost in a wide field of background sky, AND
+    // consistently sized poster to poster rather than swinging with each
+    // pattern's own angular size. So scale is set directly from a target
+    // fraction of the poster's width (zoomFactor tunes that fraction per
+    // poster; 1x = the target fraction itself), not from a fixed padding
+    // margin around the pattern — the old formula's fixed absolute term
+    // meant compact patterns got proportionally far more padding than wide
+    // ones, so patterns of different angular sizes filled very different
+    // fractions of the poster. A wide/short pattern is still capped so its
+    // *height* never overflows the sky area, same safety this always had.
+    const TARGET_WIDTH_FRAC = 0.45;
+    const scale = Math.min(
+      (TARGET_WIDTH_FRAC * zoomFactor * W) / spanX,
+      (0.9 * zoomFactor * skyH) / spanY,
+    );
     // gnomonic() already returns naked-eye-correct x (see its own comment),
     // so this is a plain scale — no extra sign flip needed here.
     function toPixel(p){ return { x: W/2 + (p.x-ccx)*scale, y: skyTop + skyH/2 - (p.y-ccy)*scale }; }
 
+    // Full rendered view extent (for background field-star culling below),
+    // derived from the scale/center just chosen rather than driving it.
+    const viewMinX = ccx - (W/2)/scale, viewMaxX = ccx + (W/2)/scale;
+    const viewMinY = ccy - (skyH/2)/scale, viewMaxY = ccy + (skyH/2)/scale;
     const halfWDeg = Math.atan(Math.max(Math.abs(viewMinX),Math.abs(viewMaxX)))*180/Math.PI / Math.max(0.15, Math.cos(degToRad(cdec)));
     const halfHDeg = Math.atan(Math.max(Math.abs(viewMinY),Math.abs(viewMaxY)))*180/Math.PI;
 
