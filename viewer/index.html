@@ -5,9 +5,11 @@
 <title>Constellation Finder — AR Viewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <script src="starinfo.js"></script>
+<script src="starlore.js"></script>
 <script src="dsoinfo.js"></script>
 <script src="constellationart.js"></script>
 <script src="constellationlines.js"></script>
+<script src="constellationlore.js"></script>
 <style>
   :root{
     --bg:#0b0d12; --panel:#1a1d24; --border:#333844; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe; --good:#5ee08a; --warn:#ffb04a;
@@ -61,6 +63,8 @@
     padding:16px 16px calc(16px + env(safe-area-inset-bottom)) 16px; padding-top:calc(16px + env(safe-area-inset-top));
   }
   #infoPanel h2{ font-size:16px; margin:0 0 10px; }
+  .storyText p{ font-size:14px; line-height:1.6; color:var(--text); margin:0 0 12px; }
+  .storyText p:last-child{ color:var(--muted); font-style:italic; }
   .artCards{ display:flex; gap:10px; overflow-x:auto; margin:10px 0 16px; padding-bottom:4px; }
   .artCard{ flex:0 0 auto; width:150px; }
   .artCard img{ width:150px; height:150px; object-fit:cover; border-radius:8px; background:var(--panel); display:block; }
@@ -221,8 +225,9 @@
     <button id="findBestTimeBtn" style="width:100%;">🔭 Find best time to view</button>
     <div id="bestTimeResults"></div>
 
-    <h2 style="margin-top:24px;">The stars in this portrait</h2>
+    <h2 style="margin-top:24px;">The story behind your stars</h2>
     <p class="hint" id="infoConstellations"></p>
+    <div id="infoStory" class="storyText"></div>
     <div id="infoArt"></div>
     <div class="starList" id="infoStars"></div>
 
@@ -424,18 +429,19 @@
     return 'very faint, near the naked-eye limit';
   }
 
-  // Real distance/spectral-type/notable-feature facts only exist for the
-  // well-documented named stars (see starinfo.js) — everything else still
-  // gets name, constellation, and a plain-language brightness description
-  // from its magnitude (which every star in the catalog has), rather than a
-  // guessed number.
+  // The story/etymology behind a star's name (see starlore.js) reads far
+  // better to a customer than its spectral type and distance in light-years
+  // — shown instead of the scientific facts (still in starinfo.js/STAR_INFO,
+  // kept around in case something elsewhere ever wants it) wherever a star
+  // is well-documented enough to have one. Everything else still gets name,
+  // constellation, and a plain-language brightness description from its
+  // magnitude (which every star in the catalog has), rather than a guessed
+  // fact.
   function describeStarHtml(s){
-    const info = (window.STAR_INFO && window.STAR_INFO[s.name]) || null;
+    const lore = (window.STAR_LORE && window.STAR_LORE[s.name]) || null;
     const lines = [`Officially part of the constellation <b>${escapeHtml(s.constellation)}</b>.`];
-    lines.push(`Apparent magnitude ${s.mag} — ${describeBrightness(s.mag)}.`);
-    if(info && info.distanceLy) lines.push(`About ${info.distanceLy.toLocaleString('en-US')} light-years from Earth.`);
-    if(info && info.type) lines.push(`Type: ${escapeHtml(info.type)}.`);
-    if(info && info.note) lines.push(escapeHtml(info.note));
+    if(lore) lines.push(escapeHtml(lore));
+    else lines.push(`Apparent magnitude ${s.mag} — ${describeBrightness(s.mag)}.`);
     return `<div class="starEntry"><b>${escapeHtml(s.name)}</b><div class="starMeta">${lines.join(' ')}</div></div>`;
   }
 
@@ -445,12 +451,61 @@
   function describeFieldStarHtml(f){
     const [, , mag, name] = f;
     if(!name) return '';
-    const info = (window.STAR_INFO && window.STAR_INFO[name]) || null;
-    const lines = [`Apparent magnitude ${mag} — ${describeBrightness(mag)}.`];
-    if(info && info.distanceLy) lines.push(`About ${info.distanceLy.toLocaleString('en-US')} light-years from Earth.`);
-    if(info && info.type) lines.push(`Type: ${escapeHtml(info.type)}.`);
-    if(info && info.note) lines.push(escapeHtml(info.note));
+    const lore = (window.STAR_LORE && window.STAR_LORE[name]) || null;
+    const lines = [lore ? escapeHtml(lore) : `Apparent magnitude ${mag} — ${describeBrightness(mag)}.`];
     return `<div class="starEntry"><b>${escapeHtml(name)}</b><div class="starMeta">${lines.join(' ')}</div></div>`;
+  }
+
+  // A short cheap hash so the closing line varies poster-to-poster (picked
+  // from CLOSING_LINES below) without needing Math.random() — this runs every
+  // time buildInfoPanel is called, so a random pick would flicker between
+  // renders instead of staying put for a given constellation.
+  function stableHash(str){
+    let h = 0;
+    for(let i=0; i<str.length; i++){ h = (h*31 + str.charCodeAt(i)) | 0; }
+    return Math.abs(h);
+  }
+
+  const STORY_CLOSING_LINES = [
+    name => `Now sharing this same corner of the sky is a newer arrival: ${name}, a constellation of your own tracing.`,
+    name => `Alongside these old, familiar shapes, the sky has quietly made room for one more — ${name}.`,
+    name => `${name} now keeps company with these ancient figures, its own story written in the very same stars.`,
+    name => `Every constellation was once new. ${name} joins this old neighborhood of the sky as the latest to be named.`,
+  ];
+
+  // Weaves the official constellation's mythology and a nearby named star's
+  // etymology into a short narrative connecting them to the customer's own
+  // constellation — replaces a purely scientific rundown with something a
+  // customer would actually want to read about their gift. Returns '' if
+  // neither the constellation nor any nearby star has curated lore (see
+  // constellationlore.js / starlore.js), rather than showing a half-empty
+  // story with only one half of the pairing.
+  function buildConstellationStory(cons){
+    if(!map || !cons.length) return '';
+    const counts = {};
+    for(const s of map.stars) counts[s.constellation] = (counts[s.constellation]||0)+1;
+    const primary = [...cons].sort((a,b) => (counts[b]||0)-(counts[a]||0))[0];
+    const conLore = window.CONSTELLATION_LORE && window.CONSTELLATION_LORE[primary];
+
+    // Prefer a named star actually used in the portrait; fall back to the
+    // brightest nearby named field star if none of the portrait's own stars
+    // has a lore entry (most portrait stars are faint Bayer-letter stars).
+    const portraitPick = map.stars.find(s => window.STAR_LORE && window.STAR_LORE[s.name]);
+    const fieldCandidates = (map.fieldStars||[])
+      .filter(f => f[3] && window.STAR_LORE && window.STAR_LORE[f[3]])
+      .sort((a,b) => a[2]-b[2]);
+    const starName = portraitPick ? portraitPick.name : (fieldCandidates[0] && fieldCandidates[0][3]);
+    const starLore = starName && window.STAR_LORE[starName];
+
+    if(!conLore && !starLore) return '';
+
+    const name = escapeHtml(map.name || 'this constellation');
+    const parts = [];
+    if(conLore) parts.push(`<p>${escapeHtml(conLore)}</p>`);
+    if(starLore) parts.push(`<p>Nearby shines <b>${escapeHtml(starName)}</b> — ${escapeHtml(starLore)}</p>`);
+    const closing = STORY_CLOSING_LINES[stableHash(map.name || primary) % STORY_CLOSING_LINES.length](name);
+    parts.push(`<p>${closing}</p>`);
+    return parts.join('');
   }
 
   function buildInfoPanel(){
@@ -463,6 +518,8 @@
     const cons = [...new Set(map.stars.map(s=>s.constellation))];
     document.getElementById('infoConstellations').textContent =
       `This portrait spans part of ${cons.length > 1 ? 'the official constellations' : 'the official constellation'} ${cons.join(', ')}.`;
+
+    document.getElementById('infoStory').innerHTML = buildConstellationStory(cons);
 
     const artEl = document.getElementById('infoArt');
     const artEntries = cons.map(c => ({ c, art: window.CONSTELLATION_ART && window.CONSTELLATION_ART[c] })).filter(e => e.art);
