@@ -1880,17 +1880,25 @@
     // clearly prominent, not lost in a wide field of background sky, AND
     // consistently sized poster to poster rather than swinging with each
     // pattern's own angular size. So scale is set directly from a target
-    // fraction of the poster's width (zoomFactor tunes that fraction per
-    // poster; 1x = the target fraction itself), not from a fixed padding
-    // margin around the pattern — the old formula's fixed absolute term
-    // meant compact patterns got proportionally far more padding than wide
-    // ones, so patterns of different angular sizes filled very different
-    // fractions of the poster. A wide/short pattern is still capped so its
-    // *height* never overflows the sky area, same safety this always had.
-    const TARGET_WIDTH_FRAC = 0.45;
+    // fraction of the poster (zoomFactor tunes that fraction per poster; 1x
+    // = the target fraction itself), not from a fixed padding margin around
+    // the pattern — the old formula's fixed absolute term meant compact
+    // patterns got proportionally far more padding than wide ones, so
+    // patterns of different angular sizes filled very different fractions
+    // of the poster.
+    //
+    // The target applies to WHICHEVER dimension the pattern is more
+    // stretched along, not width alone with a loose height allowance — a
+    // pattern that's e.g. twice as tall as it is wide would otherwise still
+    // hit the width target and, as a side effect, balloon to ~90% of the
+    // sky's height, which reads as huge overall even though it's exactly
+    // on-target by width (confirmed against a real order: 45.0% width but
+    // 87.9% height). Capping both axes at the same fraction keeps the
+    // pattern's overall visual size consistent regardless of its shape.
+    const TARGET_FRAC = 0.45;
     const scale = Math.min(
-      (TARGET_WIDTH_FRAC * zoomFactor * W) / spanX,
-      (0.9 * zoomFactor * skyH) / spanY,
+      (TARGET_FRAC * zoomFactor * W) / spanX,
+      (TARGET_FRAC * zoomFactor * skyH) / spanY,
     );
     // gnomonic() already returns naked-eye-correct x (see its own comment),
     // so this is a plain scale — no extra sign flip needed here.
