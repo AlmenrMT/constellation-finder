@@ -72,8 +72,15 @@
 
   /* ---- AR screen ---- */
   #arScreen{ position:fixed; inset:0; display:none; background:#000; }
-  #camVideo{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
-  #arCanvas{ position:absolute; inset:0; width:100%; height:100%; }
+  /* Opacity-faded rather than display-toggled so switching the camera on/off
+     doesn't cut instantly — the star overlay (arCanvas, drawn regardless of
+     camera state) stays put throughout, only the video layer beneath it
+     fades, so turning the camera on reads as the live sky easing in behind
+     the same stars rather than a hard swap. */
+  #camVideo{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:0; transition:opacity 0.6s ease; }
+  #arCanvas{ position:absolute; inset:0; width:100%; height:100%; touch-action:none; }
+  #arCanvas.draggable{ cursor:grab; }
+  #arCanvas.draggable:active{ cursor:grabbing; }
   #noCamNote{ color:var(--muted); font-size:12px; text-align:center; }
   #noCamNote:empty{ display:none; }
 
@@ -383,6 +390,57 @@
     buildDrawingSprite(); // pxPerDeg depends on canvas size, so the sprite must be rebuilt
   }
   window.addEventListener('resize', resizeCanvas);
+
+  // ---------- drag-to-look, for whenever the camera isn't running ----------
+  // heading/pitch are otherwise only ever driven by the real compass/gyro
+  // (deviceorientation, below) — with no camera and no usable sensor (any
+  // desktop, or a phone that declined that permission), the view would
+  // otherwise just sit frozen facing one fixed direction. Dragging moves the
+  // SAME heading/pitch the camera-on view uses, through the SAME toScreen()
+  // projection in renderFrame() — so this is never a separate "preview"
+  // rendering, just the one real view, steered by hand instead of by
+  // physically turning the phone. Deliberately gated to !cameraActive: once
+  // the camera is live, heading/pitch belong to the compass, and a stray
+  // drag shouldn't fight it.
+  // Clamped to roughly 1.5 field-of-views beyond the constellation's own
+  // position in each direction — matching the "only the vicinity" scope of
+  // the field stars actually saved in the map file (see
+  // collectFieldStarsForExport in constellation-finder), so dragging further
+  // just runs out of stars to show rather than pretending to cover the
+  // whole sky.
+  let dragState = null;
+  function updateDragAffordance(enabled){
+    arCanvas.classList.toggle('draggable', !!enabled);
+  }
+  arCanvas.addEventListener('pointerdown', e => {
+    if(cameraActive) return;
+    dragState = { id: e.pointerId, x: e.clientX, y: e.clientY, heading, pitch };
+    arCanvas.setPointerCapture(e.pointerId);
+  });
+  arCanvas.addEventListener('pointermove', e => {
+    if(!dragState || e.pointerId !== dragState.id) return;
+    const W = arCanvas.width, H = arCanvas.height;
+    if(!W || !H) return;
+    const fovV = fovH * (H/W);
+    const pxPerDegX = W/fovH, pxPerDegY = H/fovV;
+    const dxPx = (e.clientX - dragState.x) * (window.devicePixelRatio||1);
+    const dyPx = (e.clientY - dragState.y) * (window.devicePixelRatio||1);
+    const maxPan = fovH * 1.5;
+    const centerAz = targetAltAz ? targetAltAz.az : dragState.heading;
+    const centerAlt = targetAltAz ? targetAltAz.alt : dragState.pitch;
+    const rawHeading = dragState.heading + dxPx/pxPerDegX;
+    const headingDiff = Math.max(-maxPan, Math.min(maxPan, angDiff(rawHeading, centerAz)));
+    heading = ((centerAz + headingDiff) % 360 + 360) % 360;
+    const rawPitch = dragState.pitch - dyPx/pxPerDegY;
+    pitch = centerAlt + Math.max(-maxPan, Math.min(maxPan, rawPitch - centerAlt));
+    scheduleRender();
+  });
+  function endDrag(e){
+    if(dragState && e.pointerId === dragState.id) dragState = null;
+  }
+  arCanvas.addEventListener('pointerup', endDrag);
+  arCanvas.addEventListener('pointercancel', endDrag);
+  updateDragAffordance(!cameraActive);
 
   // ---------- map file loading ----------
   function loadMapObject(obj, sourceLabel){
@@ -1081,26 +1139,47 @@
     return false;
   }
 
+  // Any pending "fade out, then actually stop the stream" from a previous
+  // off-transition — cancelled if the camera comes back on before it fires,
+  // so a quick off/on (e.g. re-evaluating the gate right as conditions
+  // change) doesn't kill a stream out from under an in-progress fade-in.
+  let cameraOffTimeout = null;
+
   async function setCameraActive(active, offReason){
+    updateDragAffordance(!active);
     if(active === cameraActive){ if(!active) noCamNote.textContent = offReason||''; return; }
     if(active){
+      if(cameraOffTimeout){ clearTimeout(cameraOffTimeout); cameraOffTimeout = null; }
       noCamNote.textContent = 'Starting camera…';
       try{
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal:'environment' } }, audio:false });
         camVideo.srcObject = stream;
-        camVideo.style.display = '';
-        noCamNote.textContent = '';
         cameraActive = true;
+        // Wait for a real frame before fading in — fading into a black/blank
+        // first frame would look like exactly the seam we're trying to avoid.
+        await new Promise(resolve => {
+          if(camVideo.videoWidth) return resolve();
+          camVideo.addEventListener('loadeddata', resolve, { once:true });
+        });
+        camVideo.style.opacity = '1';
+        noCamNote.textContent = '';
       }catch(err){
         noCamNote.textContent = 'Camera permission needed to show the live sky background. (' + err.message + ')';
-        camVideo.style.display = 'none';
+        camVideo.style.opacity = '0';
         cameraActive = false;
       }
     } else {
-      if(camVideo.srcObject){ camVideo.srcObject.getTracks().forEach(t=>t.stop()); camVideo.srcObject=null; }
-      camVideo.style.display = 'none';
+      camVideo.style.opacity = '0';
       noCamNote.textContent = offReason || '';
       cameraActive = false;
+      // Keep the stream alive through the fade so a fast re-enable (see
+      // above) can cancel this and just fade back in, instead of having to
+      // re-request getUserMedia (and re-prompt for permission on some
+      // browsers) for what the user experienced as a single continuous view.
+      cameraOffTimeout = setTimeout(() => {
+        cameraOffTimeout = null;
+        if(camVideo.srcObject){ camVideo.srcObject.getTracks().forEach(t=>t.stop()); camVideo.srcObject=null; }
+      }, 700);
     }
   }
 
