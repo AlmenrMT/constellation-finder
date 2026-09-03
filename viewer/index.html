@@ -356,6 +356,7 @@
   let drawingSpriteMeta = null; // {originDAz, originDAlt, pxPerDegX, pxPerDegY} to place the sprite each frame
   let targetAltAz = null;  // {az, alt} of the constellation's mean position — refreshed periodically
   let starsAltAz = [];     // per-star current alt/az, refreshed alongside targetAltAz
+  let fieldStarsAltAz = []; // background context stars (map.fieldStars), same refresh cycle
   let heading = 0;         // current compass heading the phone/camera faces, degrees, 0=N
   let pitch = 30;          // current altitude the phone/camera points at, degrees above horizon
   let lat = 41.12, lon = 16.87;
@@ -1358,6 +1359,10 @@
     if(!map) return;
     const jd = manualMode ? currentManualJulianDate() : nowJulianDate();
     starsAltAz = map.stars.map(s => ({ ...s, ...raDecToAltAz(s.ra, s.dec, lat, lon, jd) }));
+    fieldStarsAltAz = (map.fieldStars||[]).map(f => {
+      const aa = raDecToAltAz(f[0], f[1], lat, lon, jd);
+      return { ra:f[0], dec:f[1], mag:f[2], name:f[3], az:aa.az, alt:aa.alt };
+    });
     const { az, alt } = meanTargetAltAz(jd);
     targetAltAz = { az, alt };
     populateGridAltAz(jd);
@@ -1416,6 +1421,29 @@
         actx.globalAlpha = drawOpacity;
         actx.drawImage(drawingSprite, destX, destY);
         actx.globalAlpha = 1;
+      }
+    }
+
+    // Background context stars — only drawn while the camera is off. When
+    // it's live, real stars already fill this role through the video
+    // itself, and drawing our own on top would just double up, slightly
+    // misaligned, against the real ones. With the camera off (drag-to-look,
+    // or just before it starts), there's no video, so without this the
+    // constellation's own stars would float in isolation against plain
+    // black. Same bounded map.fieldStars snapshot the sky map and story
+    // already use, so nothing new to load.
+    if(!cameraActive){
+      for(const f of fieldStarsAltAz){
+        const p = toScreen(f.az, f.alt);
+        if(!finite(p) || p.x<-20 || p.x>W+20 || p.y<-20 || p.y>H+20) continue;
+        const r = Math.max(1, (6-f.mag)*0.9) * (W/900);
+        actx.beginPath(); actx.arc(p.x,p.y,r,0,7); actx.fillStyle='rgba(255,255,255,0.75)'; actx.fill();
+        if(showNames && f.name){
+          actx.font = `${Math.round(12*(W/900))}px -apple-system,sans-serif`;
+          actx.textAlign = 'left';
+          actx.fillStyle = 'rgba(0,0,0,0.7)'; actx.fillText(f.name, p.x+r+4*(W/900)+0.5, p.y+4*(W/900)+0.5);
+          actx.fillStyle = 'rgba(223,232,255,0.9)'; actx.fillText(f.name, p.x+r+4*(W/900), p.y+4*(W/900));
+        }
       }
     }
 
