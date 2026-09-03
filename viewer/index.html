@@ -54,6 +54,17 @@
   /* ---- shared star-list styling (summary screen intro + info panel) ---- */
   .starList{ text-align:left; font-size:13px; color:var(--muted); margin-top:6px; }
   .starEntry{ padding:8px 0; border-bottom:1px solid var(--border); line-height:1.5; }
+
+  /* ---- sky map tap-to-view popup ---- */
+  #skyMapWrap{ position:relative; }
+  #skyMapPopup{
+    position:absolute; max-width:min(260px, calc(100% - 20px)); background:var(--panel);
+    border:1px solid var(--border); border-radius:10px; padding:10px 32px 10px 12px;
+    font-size:12px; line-height:1.5; color:var(--text); box-shadow:0 6px 20px rgba(0,0,0,0.6);
+    z-index:5; pointer-events:auto;
+  }
+  #skyMapPopup b{ font-size:13px; }
+  #skyMapPopup .close{ position:absolute; top:4px; right:6px; background:none; border:none; color:var(--muted); font-size:16px; line-height:1; padding:4px; cursor:pointer; }
   .starEntry b{ color:var(--text); font-size:14px; }
   .starEntry .starMeta{ font-size:12px; }
 
@@ -218,14 +229,18 @@
     <h1 id="infoTitle" style="font-size:20px; margin:0 0 4px;">—</h1>
     <p id="infoSub" class="hint" style="margin:0 0 16px;">—</p>
 
-    <canvas id="skyMapCanvas" style="width:100%; aspect-ratio:1; background:#000; border-radius:10px; touch-action:none; display:block;"></canvas>
+    <div id="skyMapWrap">
+      <canvas id="skyMapCanvas" style="width:100%; aspect-ratio:1; background:#000; border-radius:10px; touch-action:none; display:block;"></canvas>
+      <div id="skyMapPopup" hidden></div>
+    </div>
     <div class="hint" id="skyMapLegend" style="margin-top:8px;">
       <span style="color:#ffe9a8;">●</span> portrait stars &nbsp;
       <span style="color:#dfe8ff;">●</span> other named stars &nbsp;
       <span style="color:#6ea8fe;">✛</span> deep-sky objects &nbsp;
-      <span style="color:#b4a0ff;">┈</span> official constellation outline
+      <span id="skyMapLineLegend"><span style="color:#ffd76a;">━</span> your constellation</span>
     </div>
-    <p class="hint" style="margin-top:6px;">Drag to pan, pinch or scroll to zoom — stays near the constellation.</p>
+    <button id="skyMapLineToggle" style="margin-top:8px; width:100%;">Show the official constellation outline instead</button>
+    <p class="hint" style="margin-top:6px;">Drag to pan, pinch or scroll to zoom — stays near the constellation. Tap any star for details.</p>
 
     <h2 style="margin-top:24px;">Best time to view</h2>
     <p class="hint">Finds the next week's darkest, highest-in-the-sky windows for this constellation, and checks the cloud forecast for each.</p>
@@ -611,6 +626,22 @@
   let skyMapState = null;
   const SKY_MAP_MIN_ZOOM = 0.6, SKY_MAP_MAX_ZOOM = 6, SKY_MAP_MAX_PAN_FRAC = 0.45;
 
+  // Which line set the sky map draws: the portrait's own connections
+  // (default) or the traditional official-constellation outline — never
+  // both at once (see the toggle button below and its use in renderSkyMap).
+  let skyMapShowClassical = false;
+  document.getElementById('skyMapLineToggle').addEventListener('click', () => {
+    skyMapShowClassical = !skyMapShowClassical;
+    document.getElementById('skyMapLineToggle').textContent = skyMapShowClassical
+      ? 'Show your constellation instead'
+      : 'Show the official constellation outline instead';
+    document.getElementById('skyMapLineLegend').innerHTML = skyMapShowClassical
+      ? '<span style="color:#b4a0ff;">┈</span> official constellation outline'
+      : '<span style="color:#ffd76a;">━</span> your constellation';
+    hideSkyMapPopup();
+    renderSkyMap();
+  });
+
   // gnomonic() already returns naked-eye-correct x (see its own comment), so
   // this is a plain scale — no extra sign flip needed here.
   function gnomonicToPixel(g, s, W, H){
@@ -619,6 +650,7 @@
 
   function buildSkyMap(){
     if(!map) return;
+    hideSkyMapPopup(); // stale marker positions after any rebuild
     // Match the canvas's backing store to its actual on-screen size — this
     // only produces a sensible non-zero size once the info panel (and this
     // canvas within it) is actually visible, so this is called on open, not
@@ -694,27 +726,32 @@
       skyMapCtx.fillStyle='rgba(223,232,255,0.85)'; skyMapCtx.fillText(f.name, p.x+r+3, p.y+4);
     }
 
-    skyMapCtx.save();
-    skyMapCtx.strokeStyle = 'rgba(180,160,255,0.55)';
-    skyMapCtx.lineWidth = 1.1;
-    skyMapCtx.setLineDash([1, 5]);
-    skyMapCtx.lineCap = 'round';
-    skyMapCtx.shadowColor = 'rgba(180,160,255,0.9)';
-    skyMapCtx.shadowBlur = 4;
-    for(const line of s.asterismLines){
-      const pts = line.map(g => gnomonicToPixel(g, s, W, H));
-      if(pts.every(p => !onScreen(p))) continue;
-      skyMapCtx.beginPath();
-      pts.forEach((p,i) => i===0 ? skyMapCtx.moveTo(p.x,p.y) : skyMapCtx.lineTo(p.x,p.y));
-      skyMapCtx.stroke();
-    }
-    skyMapCtx.restore();
-
-    skyMapCtx.strokeStyle = '#ffd76a'; skyMapCtx.lineWidth = 1.4;
-    for(const [a,b] of (map.edges||[])){
-      if(!s.portraitPts[a] || !s.portraitPts[a].g || !s.portraitPts[b] || !s.portraitPts[b].g) continue;
-      const pa = gnomonicToPixel(s.portraitPts[a].g, s, W, H), pb = gnomonicToPixel(s.portraitPts[b].g, s, W, H);
-      skyMapCtx.beginPath(); skyMapCtx.moveTo(pa.x,pa.y); skyMapCtx.lineTo(pb.x,pb.y); skyMapCtx.stroke();
+    // The two line sets are shown one at a time, not overlaid — together
+    // they read as visual noise, especially where they share stars — see
+    // skyMapLineToggle below.
+    if(skyMapShowClassical){
+      skyMapCtx.save();
+      skyMapCtx.strokeStyle = 'rgba(180,160,255,0.55)';
+      skyMapCtx.lineWidth = 1.1;
+      skyMapCtx.setLineDash([1, 5]);
+      skyMapCtx.lineCap = 'round';
+      skyMapCtx.shadowColor = 'rgba(180,160,255,0.9)';
+      skyMapCtx.shadowBlur = 4;
+      for(const line of s.asterismLines){
+        const pts = line.map(g => gnomonicToPixel(g, s, W, H));
+        if(pts.every(p => !onScreen(p))) continue;
+        skyMapCtx.beginPath();
+        pts.forEach((p,i) => i===0 ? skyMapCtx.moveTo(p.x,p.y) : skyMapCtx.lineTo(p.x,p.y));
+        skyMapCtx.stroke();
+      }
+      skyMapCtx.restore();
+    } else {
+      skyMapCtx.strokeStyle = '#ffd76a'; skyMapCtx.lineWidth = 1.4;
+      for(const [a,b] of (map.edges||[])){
+        if(!s.portraitPts[a] || !s.portraitPts[a].g || !s.portraitPts[b] || !s.portraitPts[b].g) continue;
+        const pa = gnomonicToPixel(s.portraitPts[a].g, s, W, H), pb = gnomonicToPixel(s.portraitPts[b].g, s, W, H);
+        skyMapCtx.beginPath(); skyMapCtx.moveTo(pa.x,pa.y); skyMapCtx.lineTo(pb.x,pb.y); skyMapCtx.stroke();
+      }
     }
     skyMapCtx.font = '600 12px -apple-system,sans-serif';
     for(const st of s.portraitPts){
@@ -741,19 +778,29 @@
   // Pointer Events unify mouse + touch: one active pointer pans, two pinch-zoom.
   const skyMapPointers = new Map();
   let skyMapPanStart = null, skyMapPinchStart = null;
+  let skyMapTapCandidate = null; // {x,y,moved} — a single pointer that hasn't moved (yet) is a tap-in-progress
+  const SKY_MAP_TAP_MAX_MOVE_PX = 8;
   skyMapCanvas.addEventListener('pointerdown', e => {
     skyMapCanvas.setPointerCapture(e.pointerId);
+    if(skyMapPointers.size === 0) hideSkyMapPopup(); // a fresh gesture starting — any old popup no longer applies
     skyMapPointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
     if(skyMapPointers.size === 1 && skyMapState){
       skyMapPanStart = { x:e.clientX, y:e.clientY, offsetX:skyMapState.offsetX, offsetY:skyMapState.offsetY };
+      skyMapTapCandidate = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
     }else if(skyMapPointers.size === 2 && skyMapState){
       const pts = [...skyMapPointers.values()];
       skyMapPinchStart = { dist: Math.hypot(pts[0].x-pts[1].x, pts[0].y-pts[1].y), scale: skyMapState.scale };
+      skyMapTapCandidate = null; // a second finger means this is a pinch, never a tap
     }
   });
   skyMapCanvas.addEventListener('pointermove', e => {
     if(!skyMapPointers.has(e.pointerId) || !skyMapState) return;
     skyMapPointers.set(e.pointerId, { x:e.clientX, y:e.clientY });
+    if(skyMapTapCandidate && skyMapTapCandidate.id === e.pointerId){
+      if(Math.hypot(e.clientX-skyMapTapCandidate.x, e.clientY-skyMapTapCandidate.y) > SKY_MAP_TAP_MAX_MOVE_PX){
+        skyMapTapCandidate.moved = true;
+      }
+    }
     if(skyMapPointers.size === 1 && skyMapPanStart){
       skyMapState.offsetX = skyMapPanStart.offsetX + (e.clientX - skyMapPanStart.x);
       skyMapState.offsetY = skyMapPanStart.offsetY + (e.clientY - skyMapPanStart.y);
@@ -766,6 +813,10 @@
     }
   });
   function endSkyMapPointer(e){
+    if(skyMapTapCandidate && skyMapTapCandidate.id === e.pointerId && !skyMapTapCandidate.moved){
+      handleSkyMapTap(e.clientX, e.clientY);
+    }
+    skyMapTapCandidate = null;
     skyMapPointers.delete(e.pointerId);
     skyMapPinchStart = null;
     if(skyMapPointers.size === 1 && skyMapState){
@@ -782,7 +833,73 @@
     e.preventDefault();
     skyMapState.scale *= (e.deltaY < 0 ? 1.1 : 0.9);
     clampSkyMapView(); renderSkyMap();
+    hideSkyMapPopup();
   }, { passive:false });
+
+  // ---------- sky map tap-to-view: hit-test whatever's under a tap (that
+  // wasn't a pan/pinch) against every marker actually drawn, and show the
+  // same lore/description text already used elsewhere on this page. ----------
+  const skyMapPopup = document.getElementById('skyMapPopup');
+  function hideSkyMapPopup(){ skyMapPopup.hidden = true; }
+  function skyMapPopupHtml(kind, entry){
+    if(kind === 'portrait'){
+      const lore = window.STAR_LORE && window.STAR_LORE[entry.name];
+      return `<b>${escapeHtml(entry.name)}</b><div>${lore ? escapeHtml(lore) : `Officially part of the constellation <b>${escapeHtml(entry.constellation)}</b>. Apparent magnitude ${entry.mag} — ${describeBrightness(entry.mag)}.`}</div>`;
+    }
+    if(kind === 'field'){
+      const lore = window.STAR_LORE && window.STAR_LORE[entry.name];
+      return `<b>${escapeHtml(entry.name)}</b><div>${lore ? escapeHtml(lore) : `Apparent magnitude ${entry.mag} — ${describeBrightness(entry.mag)}.`}</div>`;
+    }
+    // dso
+    return `<b>${escapeHtml(entry.name)}</b><div>${escapeHtml(entry.note || '')}</div>`;
+  }
+  function handleSkyMapTap(clientX, clientY){
+    if(!skyMapState) return;
+    const rect = skyMapCanvas.getBoundingClientRect();
+    // Canvas backing-store pixels vs its on-screen CSS size can differ (see
+    // buildSkyMap), so map the tap through that same ratio rather than
+    // assuming 1:1.
+    const tx = (clientX - rect.left) * (skyMapCanvas.width / rect.width);
+    const ty = (clientY - rect.top) * (skyMapCanvas.height / rect.height);
+    const s = skyMapState, W = skyMapCanvas.width, H = skyMapCanvas.height;
+
+    let best = null, bestDist = 22; // px — generous enough for a fingertip
+    const consider = (kind, entry, p, extraR) => {
+      const d = Math.hypot(p.x-tx, p.y-ty) - (extraR||0);
+      if(d < bestDist){ bestDist = d; best = { kind, entry, p }; }
+    };
+    for(const st of s.portraitPts){
+      if(!st.g) continue;
+      const p = gnomonicToPixel(st.g, s, W, H);
+      const r = Math.max(2.5, (6.5-st.mag)*0.9);
+      consider('portrait', st, p, r);
+    }
+    for(const f of s.fieldPts){
+      if(!f.name) continue;
+      const p = gnomonicToPixel(f.g, s, W, H);
+      const r = Math.max(1.5, (6-f.mag)*0.5);
+      consider('field', f, p, r);
+    }
+    for(const d of s.dsoPts){
+      const p = gnomonicToPixel(d.g, s, W, H);
+      consider('dso', d, p, 6);
+    }
+
+    if(!best){ hideSkyMapPopup(); return; }
+    skyMapPopup.innerHTML = `<button class="close" aria-label="Close">✕</button>` + skyMapPopupHtml(best.kind, best.entry);
+    skyMapPopup.hidden = false;
+    // Position in CSS pixels (rect is CSS-sized; the marker position above is
+    // in backing-store pixels), clamped so the popup never runs off the map.
+    const cssX = best.p.x * (rect.width / W), cssY = best.p.y * (rect.height / H);
+    const wrapRect = document.getElementById('skyMapWrap').getBoundingClientRect();
+    const popW = skyMapPopup.offsetWidth, popH = skyMapPopup.offsetHeight;
+    let left = cssX + 14, top = cssY - popH/2;
+    left = Math.max(6, Math.min(wrapRect.width - popW - 6, left));
+    top = Math.max(6, Math.min(wrapRect.height - popH - 6, top));
+    skyMapPopup.style.left = left + 'px';
+    skyMapPopup.style.top = top + 'px';
+    skyMapPopup.querySelector('.close').addEventListener('click', hideSkyMapPopup);
+  }
 
   // Precomputes each drawing-grid point's fixed (ra,dec) once at load time —
   // these don't change; only their Alt/Az (recomputed periodically) and screen
