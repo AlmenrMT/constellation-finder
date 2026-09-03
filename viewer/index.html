@@ -681,17 +681,22 @@
       .filter(d => d.g);
     // Traditional asterism outline(s) for whichever official constellation(s)
     // this portrait's stars fall in — projected the same way as everything
-    // else here, so they line up with the real stars, not drawn as static art.
-    const asterismLines = cons.flatMap(c => (window.CONSTELLATION_LINES && window.CONSTELLATION_LINES[c]) || [])
-      .map(line => line.map(([ra,dec]) => gnomonic(ra, dec, centerRa, centerDec)).filter(Boolean))
-      .filter(line => line.length >= 2);
+    // else here, so they line up with the real stars, not drawn as static
+    // art. Grouped by constellation (rather than one flat line list) so each
+    // shape can carry its own name label when shown.
+    const asterismGroups = cons.map(c => ({
+      name: c,
+      lines: ((window.CONSTELLATION_LINES && window.CONSTELLATION_LINES[c]) || [])
+        .map(line => line.map(([ra,dec]) => gnomonic(ra, dec, centerRa, centerDec)).filter(Boolean))
+        .filter(line => line.length >= 2),
+    })).filter(g => g.lines.length);
 
     const portraitExtents = portraitPts.filter(p => p.g).map(p => Math.hypot(p.g.x, p.g.y));
     const maxExtent = Math.max(0.02, ...(portraitExtents.length ? portraitExtents : [0.02]));
     const canvasSize = Math.min(skyMapCanvas.width, skyMapCanvas.height);
     const baseScale = (canvasSize * 0.35) / maxExtent;
 
-    skyMapState = { baseScale, scale: baseScale, offsetX: 0, offsetY: 0, portraitPts, fieldPts, dsoPts, asterismLines };
+    skyMapState = { baseScale, scale: baseScale, offsetX: 0, offsetY: 0, portraitPts, fieldPts, dsoPts, asterismGroups };
     renderSkyMap();
   }
 
@@ -728,21 +733,41 @@
 
     // The two line sets are shown one at a time, not overlaid — together
     // they read as visual noise, especially where they share stars — see
-    // skyMapLineToggle below.
+    // skyMapLineToggle below. Bolder than the old always-on version (this
+    // used to have to stay subtle to not fight the portrait's own lines
+    // sharing the same view — now that only one shows at a time, it can
+    // read clearly on its own), plus a name label per constellation since a
+    // portrait can span more than one.
     if(skyMapShowClassical){
       skyMapCtx.save();
-      skyMapCtx.strokeStyle = 'rgba(180,160,255,0.55)';
-      skyMapCtx.lineWidth = 1.1;
-      skyMapCtx.setLineDash([1, 5]);
+      skyMapCtx.strokeStyle = 'rgba(196,180,255,0.9)';
+      skyMapCtx.lineWidth = 2;
+      skyMapCtx.setLineDash([1, 4]);
       skyMapCtx.lineCap = 'round';
-      skyMapCtx.shadowColor = 'rgba(180,160,255,0.9)';
-      skyMapCtx.shadowBlur = 4;
-      for(const line of s.asterismLines){
-        const pts = line.map(g => gnomonicToPixel(g, s, W, H));
-        if(pts.every(p => !onScreen(p))) continue;
-        skyMapCtx.beginPath();
-        pts.forEach((p,i) => i===0 ? skyMapCtx.moveTo(p.x,p.y) : skyMapCtx.lineTo(p.x,p.y));
-        skyMapCtx.stroke();
+      skyMapCtx.shadowColor = 'rgba(196,180,255,1)';
+      skyMapCtx.shadowBlur = 8;
+      for(const group of s.asterismGroups){
+        const allPts = [];
+        for(const line of group.lines){
+          const pts = line.map(g => gnomonicToPixel(g, s, W, H));
+          if(pts.every(p => !onScreen(p))) continue;
+          allPts.push(...pts);
+          skyMapCtx.beginPath();
+          pts.forEach((p,i) => i===0 ? skyMapCtx.moveTo(p.x,p.y) : skyMapCtx.lineTo(p.x,p.y));
+          skyMapCtx.stroke();
+        }
+        if(allPts.length){
+          const cx = allPts.reduce((a,p)=>a+p.x,0)/allPts.length;
+          const cy = allPts.reduce((a,p)=>a+p.y,0)/allPts.length;
+          const lx = Math.max(40, Math.min(W-40, cx)), ly = Math.max(16, Math.min(H-10, cy));
+          skyMapCtx.save();
+          skyMapCtx.shadowBlur = 0;
+          skyMapCtx.font = '600 13px -apple-system,sans-serif';
+          skyMapCtx.textAlign = 'center';
+          skyMapCtx.fillStyle = 'rgba(0,0,0,0.75)'; skyMapCtx.fillText(group.name, lx+1, ly+1);
+          skyMapCtx.fillStyle = '#d8ccff'; skyMapCtx.fillText(group.name, lx, ly);
+          skyMapCtx.restore();
+        }
       }
       skyMapCtx.restore();
     } else {
@@ -753,13 +778,42 @@
         skyMapCtx.beginPath(); skyMapCtx.moveTo(pa.x,pa.y); skyMapCtx.lineTo(pb.x,pb.y); skyMapCtx.stroke();
       }
     }
+    // Official-constellation star points — the asterism lines are drawn from
+    // raw coordinates with no separate name/magnitude data of their own, so
+    // these are plain bright markers at each line vertex rather than
+    // magnitude-scaled like the portrait's own stars below.
+    if(skyMapShowClassical){
+      const seen = new Set();
+      for(const group of s.asterismGroups){
+        for(const line of group.lines){
+          for(const g of line){
+            const p = gnomonicToPixel(g, s, W, H);
+            if(!onScreen(p)) continue;
+            const key = Math.round(p.x)+','+Math.round(p.y);
+            if(seen.has(key)) continue;
+            seen.add(key);
+            skyMapCtx.beginPath(); skyMapCtx.arc(p.x,p.y,4,0,7); skyMapCtx.fillStyle='rgba(196,180,255,0.35)'; skyMapCtx.fill();
+            skyMapCtx.beginPath(); skyMapCtx.arc(p.x,p.y,2.2,0,7); skyMapCtx.fillStyle='#f2effe'; skyMapCtx.fill();
+          }
+        }
+      }
+    }
+
     skyMapCtx.font = '600 12px -apple-system,sans-serif';
     for(const st of s.portraitPts){
       if(!st.g) continue;
       const p = gnomonicToPixel(st.g, s, W, H);
       const r = Math.max(2.5, (6.5-st.mag)*0.9);
-      skyMapCtx.beginPath(); skyMapCtx.arc(p.x,p.y,r,0,7); skyMapCtx.fillStyle='#fffbe8'; skyMapCtx.strokeStyle='#ffd76a'; skyMapCtx.lineWidth=1.2; skyMapCtx.fill(); skyMapCtx.stroke();
-      skyMapCtx.fillStyle='#ffe9a8'; skyMapCtx.fillText(st.name, p.x, p.y-r-6);
+      // Dimmed (not hidden) while showing the classical outline instead —
+      // still there for reference/orientation, just not competing for
+      // attention with the official constellation's own stars above.
+      if(skyMapShowClassical){
+        skyMapCtx.beginPath(); skyMapCtx.arc(p.x,p.y,r,0,7); skyMapCtx.fillStyle='rgba(255,251,232,0.3)'; skyMapCtx.strokeStyle='rgba(255,215,106,0.35)'; skyMapCtx.lineWidth=1; skyMapCtx.fill(); skyMapCtx.stroke();
+        skyMapCtx.fillStyle='rgba(255,233,168,0.4)'; skyMapCtx.fillText(st.name, p.x, p.y-r-6);
+      } else {
+        skyMapCtx.beginPath(); skyMapCtx.arc(p.x,p.y,r,0,7); skyMapCtx.fillStyle='#fffbe8'; skyMapCtx.strokeStyle='#ffd76a'; skyMapCtx.lineWidth=1.2; skyMapCtx.fill(); skyMapCtx.stroke();
+        skyMapCtx.fillStyle='#ffe9a8'; skyMapCtx.fillText(st.name, p.x, p.y-r-6);
+      }
     }
 
     skyMapCtx.font = '11px -apple-system,sans-serif';
