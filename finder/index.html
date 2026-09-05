@@ -2746,7 +2746,11 @@
     blocks.push(heading('The story behind your stars'));
     blocks.push(paragraph(spansLine, FONT_LABEL, TEXT_LABEL, LABEL_LINE_H));
     if(astroText){
-      blocks.push(heading(`About the constellation ${primary}`));
+      // No sub-heading here — these lines are about {title} (the page's own
+      // subject, already named in the page title above), not about
+      // {primary} (the official constellation, named in the spans line
+      // above and in the myth heading below), so a heading naming the
+      // official constellation would mismatch the very sentences under it.
       blocks.push(paragraph(`${title} is ${astroText}`, FONT_BODY, TEXT_BODY, LINE_H));
       if(secondary.length === 1){
         blocks.push(paragraph(`${title} also carries a single star from ${secondary[0]} — a quieter, secondary influence.`, FONT_BODY, TEXT_BODY, LINE_H));
