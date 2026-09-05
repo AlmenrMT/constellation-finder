@@ -2739,11 +2739,10 @@
 
     const blocks = [{ type:'title', text: `About the constellation ${title}`, font: FONT_HEAD, h: TITLE_H }];
 
-    // The story behind your stars — which official constellation(s) it
-    // spans, then that constellation's astrological character read, then
-    // its myth and classical artwork together, then the guiding star, and
-    // only then the star-by-star breakdown.
-    blocks.push(heading('The story behind your stars'));
+    // Which official constellation(s) this spans, then that constellation's
+    // astrological character read, then its myth and classical artwork
+    // together, then the guiding star, and only then the star-by-star
+    // breakdown — no heading here, straight under the page's own title.
     blocks.push(paragraph(spansLine, FONT_LABEL, TEXT_LABEL, LABEL_LINE_H));
     if(astroText){
       // No sub-heading here — these lines are about {title} (the page's own
