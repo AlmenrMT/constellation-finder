@@ -2602,15 +2602,51 @@
   // height is computed from the actual wrapped text rather than a fixed poster
   // size, since the amount of curated lore/DSO content varies a lot from one
   // portrait to the next.
-  async function buildAboutPageCanvas(matchData, title){
-    const W = 1000, MARGIN = 90, CONTENT_W = W - MARGIN*2;
-    const NIGHT_BG = '#03050d';
+  // First sentence only — used for the two "reference list" sections
+  // (nearby named stars, deep-sky objects), which need to stay short since
+  // this whole page is capped at one poster-sized sheet (see
+  // buildAboutPageCanvas below). The portrait's own "Your stars" list keeps
+  // its full lore — that's this page's actual subject, not a reference list.
+  function firstSentence(text){
+    const m = /^.*?[.!?](?=\s|$)/.exec(text);
+    return m ? m[0] : text;
+  }
+
+  // Builds the second poster page (see buildAboutPageCanvas's own header
+  // comment for what it contains) at a given text scale, without touching
+  // the canvas — just wrapping/measuring, so the caller can try a few scales
+  // cheaply before actually drawing anything. Returns the block list plus
+  // the total height they need.
+  // First sentence only — used for the two "reference list" sections
+  // (nearby named stars, deep-sky objects), which need to stay short since
+  // this whole page is capped at one poster-sized sheet (see
+  // buildAboutPageCanvas below). The portrait's own "Your stars" list keeps
+  // its full lore — that's this page's actual subject, not a reference list.
+  function firstSentence(text){
+    const m = /^.*?[.!?](?=\s|$)/.exec(text);
+    return m ? m[0] : text;
+  }
+
+  // Lays out the second poster page's content at a given text scale, purely
+  // as measurement (no drawing) — buildAboutPageCanvas below calls this at a
+  // few candidate scales to find one whose content actually fits a single
+  // 1000x1400 sheet (same size as the poster itself — a customer expects a
+  // fixed page, not a scroll), then draws only the winning layout once.
+  // `images` is loaded once by the caller and passed in rather than
+  // refetched on every attempt.
+  function layoutAboutPage(matchData, title, scale, images){
+    const W = 1000, MARGIN = 80, CONTENT_W = W - MARGIN*2;
     const TEXT_TITLE = '#f3f6ff', TEXT_MUTED = '#8f9bc2', TEXT_LABEL = '#b9c4e8', TEXT_BODY = '#d7deef';
-    const FONT_HEAD = '600 30px -apple-system,sans-serif';
-    const FONT_SUB = '600 19px -apple-system,sans-serif';
-    const FONT_BODY = '17px -apple-system,sans-serif';
-    const FONT_LABEL = '600 14px -apple-system,sans-serif';
-    const LINE_H = 26, LABEL_LINE_H = 20;
+    const s = scale;
+    const FONT_HEAD = `600 ${Math.round(30*s)}px -apple-system,sans-serif`;
+    const FONT_SUB = `600 ${Math.round(16*s)}px -apple-system,sans-serif`;
+    const FONT_BODY = `${Math.round(14.5*s)}px -apple-system,sans-serif`;
+    const FONT_LABEL = `600 ${Math.round(12.5*s)}px -apple-system,sans-serif`;
+    const LINE_H = Math.round(19*s), LABEL_LINE_H = Math.round(17*s);
+    const HEAD_H = Math.round(30*s), TITLE_H = Math.round(42*s);
+    const PARA_GAP = Math.round(12*s), ENTRY_NAME_H = Math.round(18*s), ENTRY_GAP = Math.round(8*s);
+    const BLOCK_GAP = Math.round(14*s);
+    const IMG_W = Math.round(160*s), IMG_GAP = Math.round(14*s);
 
     const stars = matchData.stars;
     const cons = [...new Set(stars.map(s => s.constellation))];
@@ -2669,18 +2705,12 @@
       ? "a mix of bright and quiet stars"
       : "built from quieter, fainter stars — the kind of pattern you have to know is there to find it";
     const spansLine = `This portrait spans part of ${cons.length > 1 ? 'the official constellations' : 'the official constellation'} ${cons.join(', ')}.`;
-    const namedField = nearbyNamedStars(NEARBY_DEG).slice(0, 8);
-    const dsoEntries = ranked.flatMap(c => (window.DSO_INFO && window.DSO_INFO[c]) || []);
+    // Capped, and truncated to one sentence each — these two are reference
+    // lists, not this page's main subject, and the whole page has to fit one
+    // sheet (see buildAboutPageCanvas).
+    const namedField = nearbyNamedStars(NEARBY_DEG).slice(0, 5);
+    const dsoEntries = ranked.flatMap(c => (window.DSO_INFO && window.DSO_INFO[c]) || []).slice(0, 4);
 
-    const artEntries = ranked.map(c => ({ c, art: window.CONSTELLATION_ART && window.CONSTELLATION_ART[c] })).filter(e => e.art);
-    const images = [];
-    for(const { c, art } of artEntries){
-      const img = await loadImageBlob(art.url);
-      if(img) images.push({ c, art, img });
-    }
-
-    // ---- layout pass: measure everything up front so the canvas (and PDF
-    // page) can be created at exactly the height this content needs ----
     const measure = document.createElement('canvas').getContext('2d');
     function wrap(text, font, maxWidth){
       measure.font = font;
@@ -2697,28 +2727,20 @@
     }
     function paragraph(text, font, color, lineH){
       const lines = wrap(text, font, CONTENT_W);
-      return { type:'paragraph', lines, font, color, lineH, h: lines.length*lineH + 14 };
+      return { type:'paragraph', lines, font, color, lineH, h: lines.length*lineH + PARA_GAP };
     }
     function heading(text){
-      return { type:'heading', text, h: 34 };
+      return { type:'heading', text, font: FONT_SUB, h: HEAD_H };
     }
     function starEntry(name, desc){
       const lines = wrap(desc, FONT_BODY, CONTENT_W);
-      return { type:'starEntry', name, lines, h: 24 + lines.length*LINE_H + 10 };
+      return { type:'starEntry', name, nameFont: FONT_SUB, font: FONT_BODY, color: TEXT_BODY, lineH: LINE_H, lines, h: ENTRY_NAME_H + lines.length*LINE_H + ENTRY_GAP };
     }
 
-    const blocks = [{ type:'title', text: `About ${title}`, h: 46 }];
+    const blocks = [{ type:'title', text: `About ${title}`, font: FONT_HEAD, h: TITLE_H }];
 
-    if(images.length){
-      const cols = Math.min(images.length, 3), gap = 24;
-      const cardW = (CONTENT_W - gap*(cols-1)) / cols;
-      for(let i=0; i<images.length; i+=cols){
-        const rowImages = images.slice(i, i+cols);
-        const cardH = Math.max(...rowImages.map(({img}) => cardW * img.naturalHeight/img.naturalWidth));
-        blocks.push({ type:'imageRow', images: rowImages, cardW, cardH, gap, h: cardH + 34 });
-      }
-    }
-
+    // 1) The astrological reading first — no image here, this section is
+    // purely the character read, not the mythology.
     if(astroText){
       blocks.push(heading(`About the constellation ${primary}`));
       blocks.push(paragraph(`${title} is ${astroText}`, FONT_BODY, TEXT_BODY, LINE_H));
@@ -2727,15 +2749,29 @@
       } else if(secondary.length > 1){
         blocks.push(paragraph(`${title} also draws threads from ${secondary.join(', ')} — more than one influence at work.`, FONT_BODY, TEXT_BODY, LINE_H));
       }
-      if(featured){
-        blocks.push(paragraph(`${title}'s guiding star is ${featured.name} — ${featured.lore}`, FONT_BODY, TEXT_BODY, LINE_H));
-      }
       blocks.push(paragraph(`${title} is ${character}, and ${brightness}.`, FONT_BODY, TEXT_BODY, LINE_H));
     }
 
+    // 2) The story behind your stars — the official constellation's myth and
+    // its classical artwork together, followed by the guiding star (this is
+    // the section that owns the featured star; the astrology section above
+    // doesn't repeat it), and only then the star-by-star breakdown.
     blocks.push(heading('The story behind your stars'));
     blocks.push(paragraph(spansLine, FONT_LABEL, TEXT_LABEL, LABEL_LINE_H));
     if(conLore) blocks.push(paragraph(conLore, FONT_BODY, TEXT_BODY, LINE_H));
+    if(images.length){
+      const cols = Math.min(images.length, 3);
+      const CAP_LINE_H = Math.round(15*s);
+      for(let i=0; i<images.length; i+=cols){
+        const rowImages = images.slice(i, i+cols).map(entry => ({
+          ...entry,
+          captionLines: wrap(`${entry.c} — ${entry.art.source}`, FONT_LABEL, IMG_W),
+        }));
+        const cardH = Math.max(...rowImages.map(({img}) => IMG_W * img.naturalHeight/img.naturalWidth));
+        const capLines = Math.max(...rowImages.map(r => r.captionLines.length));
+        blocks.push({ type:'imageRow', images: rowImages, cardW: IMG_W, cardH, gap: IMG_GAP, capLineH: CAP_LINE_H, font: FONT_LABEL, color: TEXT_LABEL, h: cardH + Math.round(10*s) + capLines*CAP_LINE_H });
+      }
+    }
     if(featured) blocks.push(paragraph(`Nearby shines ${featured.name} — ${featured.lore}`, FONT_BODY, TEXT_BODY, LINE_H));
 
     blocks.push(heading('Your stars'));
@@ -2748,7 +2784,7 @@
     if(namedField.length){
       for(const [,,mag,fname] of namedField){
         const lore = window.STAR_LORE && window.STAR_LORE[fname];
-        blocks.push(starEntry(fname, lore || `Apparent magnitude ${mag} — ${describeBrightness(mag)}.`));
+        blocks.push(starEntry(fname, lore ? firstSentence(lore) : `Apparent magnitude ${mag} — ${describeBrightness(mag)}.`));
       }
     } else {
       blocks.push(paragraph('No other notable named stars nearby.', FONT_BODY, TEXT_MUTED, LINE_H));
@@ -2756,46 +2792,57 @@
 
     blocks.push(heading('Further out: galaxies, nebulae, clusters'));
     if(dsoEntries.length){
-      for(const d of dsoEntries) blocks.push(starEntry(d.name, d.note));
+      for(const d of dsoEntries) blocks.push(starEntry(d.name, firstSentence(d.note)));
     } else {
       blocks.push(paragraph('No notable deep-sky objects catalogued for this area yet.', FONT_BODY, TEXT_MUTED, LINE_H));
     }
 
-    const TOP_PAD = 70, BOTTOM_PAD = 70, BLOCK_GAP = 18;
-    const H = Math.round(TOP_PAD + blocks.reduce((sum,b) => sum + b.h + BLOCK_GAP, 0) + BOTTOM_PAD);
+    const contentHeight = blocks.reduce((sum,b) => sum + b.h + BLOCK_GAP, 0);
+    return { blocks, contentHeight, W, MARGIN, BLOCK_GAP, TEXT_TITLE };
+  }
 
+  // Draws the page (see buildAboutPageCanvas) at whatever scale
+  // layoutAboutPage was called with, fitted inside a fixed-size canvas —
+  // this never draws outside [0, pageH), even if content still overflows
+  // after the scale search below bottoms out, since a poster PDF page
+  // should never grow past the poster's own size.
+  function drawAboutPage(layout, pageH){
+    const NIGHT_BG = '#03050d';
+    const { blocks, W, MARGIN, BLOCK_GAP, TEXT_TITLE } = layout;
     const canvas = document.createElement('canvas');
-    canvas.width = W; canvas.height = H;
+    canvas.width = W; canvas.height = pageH;
     const ctx = canvas.getContext('2d');
     ctx.fillStyle = NIGHT_BG;
-    ctx.fillRect(0, 0, W, H);
+    ctx.fillRect(0, 0, W, pageH);
     ctx.textAlign = 'left';
 
+    const TOP_PAD = Math.round(pageH*0.05);
     let y = TOP_PAD;
     for(const b of blocks){
+      if(y > pageH) break;
       if(b.type === 'title'){
-        ctx.font = FONT_HEAD; ctx.fillStyle = TEXT_TITLE;
-        ctx.fillText(b.text, MARGIN, y + 32);
+        ctx.font = b.font; ctx.fillStyle = TEXT_TITLE;
+        ctx.fillText(b.text, MARGIN, y + b.h*0.72);
       } else if(b.type === 'heading'){
-        ctx.font = FONT_SUB; ctx.fillStyle = TEXT_TITLE;
-        ctx.fillText(b.text, MARGIN, y + 22);
+        ctx.font = b.font; ctx.fillStyle = TEXT_TITLE;
+        ctx.fillText(b.text, MARGIN, y + b.h*0.6);
         ctx.strokeStyle = 'rgba(143,155,194,0.35)'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(MARGIN, y + 34); ctx.lineTo(W-MARGIN, y + 34); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(MARGIN, y + b.h*0.92); ctx.lineTo(W-MARGIN, y + b.h*0.92); ctx.stroke();
       } else if(b.type === 'paragraph'){
         ctx.font = b.font; ctx.fillStyle = b.color;
-        b.lines.forEach((line,i) => ctx.fillText(line, MARGIN, y + 18 + i*b.lineH));
+        b.lines.forEach((line,i) => ctx.fillText(line, MARGIN, y + b.lineH*0.7 + i*b.lineH));
       } else if(b.type === 'starEntry'){
-        ctx.font = FONT_SUB; ctx.fillStyle = TEXT_TITLE;
-        ctx.fillText(b.name, MARGIN, y + 20);
-        ctx.font = FONT_BODY; ctx.fillStyle = TEXT_BODY;
-        b.lines.forEach((line,i) => ctx.fillText(line, MARGIN, y + 20 + LINE_H + i*LINE_H));
+        ctx.font = b.nameFont; ctx.fillStyle = TEXT_TITLE;
+        ctx.fillText(b.name, MARGIN, y + b.h*0.13);
+        ctx.font = b.font; ctx.fillStyle = b.color;
+        b.lines.forEach((line,i) => ctx.fillText(line, MARGIN, y + b.h*0.13 + b.lineH*0.85 + i*b.lineH));
       } else if(b.type === 'imageRow'){
         let x = MARGIN;
-        for(const { c, art, img } of b.images){
+        for(const { img, captionLines } of b.images){
           const h = b.cardW * img.naturalHeight/img.naturalWidth;
           ctx.drawImage(img, x, y, b.cardW, h);
-          ctx.font = FONT_LABEL; ctx.fillStyle = TEXT_LABEL;
-          ctx.fillText(`${c} — ${art.source}`, x, y + b.cardH + 20);
+          ctx.font = b.font; ctx.fillStyle = b.color;
+          captionLines.forEach((line,i) => ctx.fillText(line, x, y + b.cardH + b.capLineH*0.9 + i*b.capLineH));
           x += b.cardW + b.gap;
         }
       }
@@ -2803,6 +2850,40 @@
     }
 
     return canvas;
+  }
+
+  // Builds the second poster page: the astrological reading, the official
+  // constellation's myth and classical artwork, the guiding star, and every
+  // star/nearby-star/DSO description — everything on the Viewer's info page
+  // except the button-driven bits (see buildConstellationStory/
+  // buildConstellationAstrology in constellation-viewer/index.html, which
+  // this mirrors). Capped at one 1000x1400 sheet, the same size as the
+  // poster's own first page — not a scrollable/variable-length document —
+  // so a content-heavy order shrinks its text (down to a legibility floor)
+  // rather than growing the page.
+  async function buildAboutPageCanvas(matchData, title){
+    const PAGE_H = 1400;
+    const artEntries = [...new Set(matchData.stars.map(s => s.constellation))]
+      .map(c => ({ c, art: window.CONSTELLATION_ART && window.CONSTELLATION_ART[c] }))
+      .filter(e => e.art);
+    const images = [];
+    for(const { c, art } of artEntries){
+      const img = await loadImageBlob(art.url);
+      if(img) images.push({ c, art, img });
+    }
+
+    // Try full size first, then shrink text/images together in a couple of
+    // passes if the content doesn't fit — wrapping isn't linear in font
+    // size, so re-measuring at each attempt (rather than scaling the first
+    // attempt's pixel output) is what keeps every attempt's text sharp.
+    const MIN_SCALE = 0.62;
+    let scale = 1, layout = layoutAboutPage(matchData, title, scale, images);
+    for(let i = 0; i < 4 && layout.contentHeight > PAGE_H && scale > MIN_SCALE; i++){
+      scale = Math.max(MIN_SCALE, scale * (PAGE_H / layout.contentHeight) * 0.97);
+      layout = layoutAboutPage(matchData, title, scale, images);
+    }
+
+    return drawAboutPage(layout, PAGE_H);
   }
 
   async function saveToOrder(){
@@ -2826,9 +2907,14 @@
     const pdf = new jsPDF({ unit: 'px', format: [1000, 1400] });
     pdf.addImage(c, 'PNG', 0, 0, 1000, 1400);
 
+    // JPEG, not PNG — this page embeds a real photo/illustration, which PNG
+    // (lossless, built for flat color) encodes far larger than a photo-aware
+    // codec does; at this quality the size difference is roughly 3x, which
+    // matters because the emailed copy is base64-encoded inside a Supabase
+    // Edge Function with its own memory ceiling (see send-poster-email).
     const aboutCanvas = await buildAboutPageCanvas(lastMatchData, lastMatchData.name);
     pdf.addPage([aboutCanvas.width, aboutCanvas.height], 'p');
-    pdf.addImage(aboutCanvas, 'PNG', 0, 0, aboutCanvas.width, aboutCanvas.height);
+    pdf.addImage(aboutCanvas.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, aboutCanvas.width, aboutCanvas.height);
 
     const pdfBlob = pdf.output('blob');
 
