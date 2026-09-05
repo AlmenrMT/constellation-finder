@@ -17,16 +17,20 @@
   .wrap{ max-width:960px; margin:0 auto; padding:0 20px; }
   a{ color:var(--accent); }
 
-  header.hero{ padding:56px 0 40px; }
-  .hero-grid{ display:grid; grid-template-columns:1.1fr 0.9fr; gap:40px; align-items:center; }
-  @media (max-width:760px){ .hero-grid{ grid-template-columns:1fr; } }
-  .hero h1{ font-size:38px; line-height:1.15; margin:0 0 16px; }
+  header.hero{ padding:56px 0 40px; text-align:center; }
+  .hero h1{ font-size:38px; line-height:1.15; margin:0 auto 32px; max-width:680px; }
   .hero h1 span{ color:var(--accent); }
-  .hero p.lead{ color:var(--muted); font-size:16px; margin:0 0 24px; max-width:480px; }
+  .hero p.lead{ color:var(--muted); font-size:16px; margin:0 auto 32px; max-width:560px; }
   .hero .btn{ display:inline-block; background:var(--accent); color:var(--accent-ink); font-weight:700; text-decoration:none; padding:13px 22px; border-radius:10px; font-size:15px; }
-  .poster-frame{ background:#000; border-radius:14px; padding:10px; box-shadow:0 20px 60px -20px rgba(0,0,0,.6); border:1px solid var(--border); }
+
+  .example-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:0 0 32px; }
+  @media (max-width:700px){ .example-row{ grid-template-columns:1fr; } }
+  .example-card{ aspect-ratio:4/3; background:#000; border-radius:12px; overflow:hidden; border:1px solid var(--border); }
+  .example-card img{ width:100%; height:100%; object-fit:cover; display:block; }
+
+  .poster-frame{ background:#000; border-radius:14px; padding:10px; box-shadow:0 20px 60px -20px rgba(0,0,0,.6); border:1px solid var(--border); max-width:380px; margin:0 auto; }
   .poster-frame img{ display:block; width:100%; border-radius:6px; }
-  .poster-caption{ text-align:center; color:var(--muted); font-size:12px; margin-top:10px; }
+  .poster-caption{ text-align:center; color:var(--muted); font-size:12px; margin:10px auto 28px; max-width:380px; }
 
   section{ padding:48px 0; border-top:1px solid var(--border); }
   section h2{ font-size:24px; margin:0 0 8px; }
@@ -103,67 +107,26 @@
 <div class="wrap">
 
   <header class="hero">
-    <div class="hero-grid">
-      <div>
-        <h1>Turn someone you love into a <span>constellation</span>.</h1>
-        <p class="lead">
-          Send a photo. We trace it as a line portrait, then connect it into real stars in the night sky —
-          so the poster on the wall is also something you can go outside and actually find.
-        </p>
-        <a class="btn" href="#order">Order your poster →</a>
-      </div>
-      <div>
-        <div class="poster-frame">
-          <img src="assets/poster-example.jpg" alt="Example poster: a line-art portrait named Jonas, connected to real stars near RA 2h34m, Dec +34°19'">
-        </div>
-        <div class="poster-caption">An actual customer poster — the lines connect to real stars: Almaak, Algol, Mirach, Hamal, Sheratan.</div>
-      </div>
-    </div>
-  </header>
+    <h1>Dedicate a real and unique <span>constellation</span> to a loved one</h1>
 
-  <section>
-    <h2>How it works</h2>
-    <p class="section-lead">From photo to real night sky, in four steps.</p>
-    <div class="how-steps">
-      <div class="how-step">
-        <div class="how-step-img"><img src="assets/how-it-works-1-photo.jpg" alt="An original photo of a smiling girl, used as the starting point for a poster"></div>
-        <div class="how-step-body">
-          <div class="num">1</div>
-          <h3>Upload a photo</h3>
-          <p>A portrait, a pet, a skyline — anything with a clear outline works well as a line drawing.</p>
-        </div>
-      </div>
-      <div class="how-step">
-        <div class="how-step-img"><img src="assets/how-it-works-2-outline.jpg" alt="A line-drawing outline traced from the photo"></div>
-        <div class="how-step-body">
-          <div class="num">2</div>
-          <h3>Outline</h3>
-          <p>We create an outline based on your image.</p>
-        </div>
-      </div>
-      <div class="how-step">
-        <div class="how-step-img"><img src="assets/how-it-works-3-poster.jpg" alt="The finished poster, with the outline connected to real stars in the night sky"></div>
-        <div class="how-step-body">
-          <div class="num">3</div>
-          <h3>Poster</h3>
-          <p>The outline is matched to real stars in your chosen hemisphere, so every line on the poster is a real star in the real sky — delivered as a print-ready PDF, or a framed print to your door.</p>
-        </div>
-      </div>
-      <div class="how-step">
-        <div class="how-step-img"><img src="assets/how-it-works-4-app.jpg" alt="The free companion app pointing at the sky to guide you to the constellation"></div>
-        <div class="how-step-body">
-          <div class="num">4</div>
-          <h3>See your constellation live</h3>
-          <ul>
-            <li><span class="tick">✓</span> Use the QR code on the poster to access our free app</li>
-            <li><span class="tick">✓</span> Point your phone at the sky and it guides you straight to the constellation</li>
-            <li><span class="tick">✓</span> See real facts about each star it's built from — distance, type, what makes it interesting</li>
-            <li><span class="tick">✓</span> Works anywhere the constellation is above the horizon, any night</li>
-          </ul>
-        </div>
-      </div>
+    <div class="example-row">
+      <div class="example-card"><img src="assets/example-victoria.jpg" alt="A woman's profile, traced as a line portrait and connected to real stars near Eridanus and Orion"></div>
+      <div class="example-card"><img src="assets/example-couple.jpg" alt="A couple's portrait, traced as a line portrait and connected to real stars near Cancer and Gemini"></div>
+      <div class="example-card"><img src="assets/example-dog.jpg" alt="A dog's portrait, traced as a line portrait and connected to real stars near Ursa Major and Ursa Minor"></div>
     </div>
-  </section>
+
+    <p class="lead">
+      Send a photo. We trace it as a line portrait, then connect it into real stars in the night sky
+      and send you a poster with a link to an app tracing the constellation live on the sky.
+    </p>
+
+    <div class="poster-frame">
+      <img src="assets/poster-example.jpg" alt="Example poster: a line-art portrait named Jonas, connected to real stars near RA 2h34m, Dec +34°19'">
+    </div>
+    <div class="poster-caption">An actual customer poster — the lines connect to real stars: Almaak, Algol, Mirach, Hamal, Sheratan.</div>
+
+    <a class="btn" href="#order">Order your poster →</a>
+  </header>
 
   <section id="order">
     <h2>Order your poster</h2>
@@ -225,6 +188,50 @@
       <h3>Order received!</h3>
       <p id="successSummary"></p>
       <p>We'll email you shortly to confirm details and arrange payment. Thanks for trusting us with this one.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>How it works</h2>
+    <p class="section-lead">From photo to real night sky, in four steps.</p>
+    <div class="how-steps">
+      <div class="how-step">
+        <div class="how-step-img"><img src="assets/how-it-works-1-photo.jpg" alt="An original photo of a smiling girl, used as the starting point for a poster"></div>
+        <div class="how-step-body">
+          <div class="num">1</div>
+          <h3>Upload a photo</h3>
+          <p>A portrait, a pet, a skyline — anything with a clear outline works well as a line drawing.</p>
+        </div>
+      </div>
+      <div class="how-step">
+        <div class="how-step-img"><img src="assets/how-it-works-2-outline.jpg" alt="A line-drawing outline traced from the photo"></div>
+        <div class="how-step-body">
+          <div class="num">2</div>
+          <h3>Outline</h3>
+          <p>We create an outline based on your image.</p>
+        </div>
+      </div>
+      <div class="how-step">
+        <div class="how-step-img"><img src="assets/how-it-works-3-poster.jpg" alt="The finished poster, with the outline connected to real stars in the night sky"></div>
+        <div class="how-step-body">
+          <div class="num">3</div>
+          <h3>Poster</h3>
+          <p>The outline is matched to real stars in your chosen hemisphere, so every line on the poster is a real star in the real sky — delivered as a print-ready PDF, or a framed print to your door.</p>
+        </div>
+      </div>
+      <div class="how-step">
+        <div class="how-step-img"><img src="assets/how-it-works-4-app.jpg" alt="The free companion app pointing at the sky to guide you to the constellation"></div>
+        <div class="how-step-body">
+          <div class="num">4</div>
+          <h3>See your constellation live</h3>
+          <ul>
+            <li><span class="tick">✓</span> Use the QR code on the poster to access our free app</li>
+            <li><span class="tick">✓</span> Point your phone at the sky and it guides you straight to the constellation</li>
+            <li><span class="tick">✓</span> See real facts about each star it's built from — distance, type, what makes it interesting</li>
+            <li><span class="tick">✓</span> Works anywhere the constellation is above the horizon, any night</li>
+          </ul>
+        </div>
+      </div>
     </div>
   </section>
 
