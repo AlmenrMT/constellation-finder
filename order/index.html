@@ -50,14 +50,34 @@
   .how-step li:last-child{ margin-bottom:0; }
   .how-step li .tick{ color:var(--good); flex-shrink:0; }
 
-  form.order{ background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:28px; max-width:560px; }
+  /* The order section breaks out of .wrap's 960px column to use the full
+     window width — it's the one section with enough fields (and, once
+     framed, an address) to actually benefit from the room. */
+  section#order{
+    margin-left:calc(50% - 50vw); margin-right:calc(50% - 50vw);
+    padding-left:max(20px, calc(50vw - 620px)); padding-right:max(20px, calc(50vw - 620px));
+  }
+  form.order{ background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:28px; }
+  .order-grid{ display:grid; grid-template-columns:1fr 340px; gap:32px; align-items:start; }
+  @media (max-width:860px){ .order-grid{ grid-template-columns:1fr; } }
+  .order-side{ position:sticky; top:20px; }
   .field{ margin-bottom:18px; }
   .field label{ display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
   .field input[type=text], .field input[type=email], .field select{
     width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text);
     padding:11px 12px; border-radius:8px; font-size:14px;
   }
-  .field input[type=file]{ width:100%; color:var(--muted); font-size:13px; }
+  /* The native file input's own "Choose File"/"No file chosen" text is
+     rendered by the browser in the OS/browser locale and can't be
+     overridden directly — so the real input is made invisible but still
+     clickable/focusable (not display:none, which would drop it from the
+     tab order and stop it receiving clicks), stacked under an always-
+     English custom button + filename, kept in sync via a 'change' listener
+     (see addItem() in the script below). */
+  .file-picker{ position:relative; display:flex; align-items:center; gap:10px; background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:5px; }
+  .file-picker input[type=file]{ position:absolute; inset:0; width:100%; height:100%; opacity:0; cursor:pointer; margin:0; }
+  .file-picker-btn{ flex-shrink:0; background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:7px 12px; font-size:13px; font-weight:600; }
+  .file-picker-name{ color:var(--muted); font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .radio-cards{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   @media (max-width:480px){ .radio-cards{ grid-template-columns:1fr; } }
   .radio-card{ position:relative; }
@@ -133,55 +153,63 @@
     <p class="section-lead">One order can include more than one constellation — add another if you're doing one per family member. We'll email you to confirm and arrange payment before we start.</p>
 
     <form class="order" id="orderForm" novalidate>
-      <div id="itemsContainer"></div>
+      <div class="order-grid">
+        <div class="order-main">
+          <div id="itemsContainer"></div>
 
-      <button type="button" class="add-item" id="addItemBtn">+ Add another constellation</button>
+          <button type="button" class="add-item" id="addItemBtn">+ Add another constellation</button>
 
-      <div class="field">
-        <label for="email">Your email address</label>
-        <input type="email" id="email" placeholder="you@example.com" required>
-      </div>
-
-      <div id="addressFields">
-        <div class="field">
-          <label for="addrName">Full name</label>
-          <input type="text" id="addrName">
-        </div>
-        <div class="field">
-          <label for="addrStreet">Street address</label>
-          <input type="text" id="addrStreet">
-        </div>
-        <div class="field-row">
           <div class="field">
-            <label for="addrCity">City</label>
-            <input type="text" id="addrCity">
+            <label for="email">Your email address</label>
+            <input type="email" id="email" placeholder="you@example.com" required>
           </div>
-          <div class="field">
-            <label for="addrPostal">Postal code</label>
-            <input type="text" id="addrPostal">
+
+          <div id="addressFields">
+            <div class="field-row">
+              <div class="field">
+                <label for="addrName">Full name</label>
+                <input type="text" id="addrName">
+              </div>
+              <div class="field">
+                <label for="addrStreet">Street address</label>
+                <input type="text" id="addrStreet">
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="addrCity">City</label>
+                <input type="text" id="addrCity">
+              </div>
+              <div class="field">
+                <label for="addrPostal">Postal code</label>
+                <input type="text" id="addrPostal">
+              </div>
+            </div>
+            <div class="field">
+              <label for="addrCountry">Country</label>
+              <select id="addrCountry"></select>
+              <div class="hint">Used only to work out shipping — Europe €5, elsewhere $10, free over $100.</div>
+            </div>
           </div>
         </div>
-        <div class="field">
-          <label for="addrCountry">Country</label>
-          <select id="addrCountry"></select>
-          <div class="hint">Used only to work out shipping — Europe €5, elsewhere $10, free over $100.</div>
+
+        <div class="order-side">
+          <div class="summary-card" id="orderSummary">
+            <div id="summaryItems"></div>
+            <div class="summary-row" id="summaryShippingRow" style="display:none;">
+              <span>Shipping</span><span id="summaryShipping">—</span>
+            </div>
+            <div class="summary-row total">
+              <span>Total</span><span id="summaryTotal">—</span>
+            </div>
+            <div class="summary-note" id="summaryNote"></div>
+          </div>
+
+          <button type="submit" class="submit" id="submitBtn">Place order</button>
+          <div class="error" id="formError"></div>
+          <div class="hint">Payment isn't collected on this page yet — after you order, we'll email you to arrange payment.</div>
         </div>
       </div>
-
-      <div class="summary-card" id="orderSummary">
-        <div id="summaryItems"></div>
-        <div class="summary-row" id="summaryShippingRow" style="display:none;">
-          <span>Shipping</span><span id="summaryShipping">—</span>
-        </div>
-        <div class="summary-row total">
-          <span>Total</span><span id="summaryTotal">—</span>
-        </div>
-        <div class="summary-note" id="summaryNote"></div>
-      </div>
-
-      <button type="submit" class="submit" id="submitBtn">Place order</button>
-      <div class="error" id="formError"></div>
-      <div class="hint">Payment isn't collected on this page yet — after you order, we'll email you to arrange payment.</div>
     </form>
 
     <div class="success-panel" id="successPanel">
@@ -243,9 +271,14 @@
       </div>
       <div class="field">
         <label>Photo to turn into a line portrait</label>
-        <input type="file" class="f-photo" accept="image/*" required>
+        <div class="file-picker">
+          <input type="file" class="f-photo" accept="image/*" required>
+          <span class="file-picker-btn">Choose file</span>
+          <span class="file-picker-name">No file chosen</span>
+        </div>
         <div class="hint">JPG or PNG, ideally a clear, well-lit subject.</div>
       </div>
+      <div class="field-row">
       <div class="field">
         <label>Poster title</label>
         <input type="text" class="f-title" placeholder="e.g. Jonas" maxlength="60" required>
@@ -258,6 +291,7 @@
           <option value="Southern">Southern hemisphere</option>
         </select>
         <div class="hint f-hemisphere-hint">Whichever hemisphere you'll actually be standing under to find it.</div>
+      </div>
       </div>
       <div class="field">
         <label>Poster format</label>
@@ -343,6 +377,13 @@
     // as a mutually-exclusive pair — without one, "PDF" and "Framed" are two
     // independent checkboxes, and picking one never unpicks the other.
     frag.querySelectorAll('.f-product').forEach(r => { r.name = 'product-' + itemCounter; });
+    // Keeps the custom, always-English filename label (see .file-picker in
+    // <style>) in sync with the real (invisible) file input.
+    const photoInput = frag.querySelector('.f-photo');
+    const photoNameEl = frag.querySelector('.file-picker-name');
+    photoInput.addEventListener('change', () => {
+      photoNameEl.textContent = photoInput.files[0] ? photoInput.files[0].name : 'No file chosen';
+    });
     itemsContainer.appendChild(frag);
     refreshItemChrome();
     applyGeoHemisphereDefault(itemBlocks()[itemBlocks().length - 1]);
