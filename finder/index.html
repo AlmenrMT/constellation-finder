@@ -6,6 +6,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="stars.js"></script>
 <script src="field.js"></script>
+<script src="starlore.js"></script>
+<script src="constellationlore.js"></script>
+<script src="constellationart.js"></script>
+<script src="astrolore.js"></script>
+<script src="dsoinfo.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -1373,23 +1378,6 @@
     return { centerRa: cra, centerDec: cdec, halfWidthDeg: halfWDeg, halfHeightDeg: halfHDeg };
   }
 
-  // Snapshots FIELD_STARS within a generous multiple of the default view so a
-  // standalone viewer has room to pan/zoom a bit without needing our full
-  // ~24k-star catalog — this makes the map file self-contained.
-  function collectFieldStarsForExport(cra, cdec, halfWDeg, halfHDeg){
-    const field = window.FIELD_STARS || [];
-    const raPad = halfWDeg*2.5+3, decPad = halfHDeg*2.5+3;
-    const out = [];
-    for(const [ra,dec,mag,name] of field){
-      const ddec = dec-cdec;
-      if(Math.abs(ddec) > decPad) continue;
-      const dra = (((ra-cra+540)%360)-180) * Math.cos(degToRad(cdec));
-      if(Math.abs(dra) > raPad) continue;
-      out.push([ra,dec,mag,name]);
-    }
-    return out;
-  }
-
   // ---------- sky chart rendering ----------
 
   // zoom: 1 = default framing (fits the matched pattern with padding); >1 zooms
@@ -2281,7 +2269,6 @@
       }).join('');
 
     const viewBounds = computeDefaultViewBounds(best.matchedStars);
-    const fieldStarsSnapshot = collectFieldStarsForExport(viewBounds.centerRa, viewBounds.centerDec, viewBounds.halfWidthDeg, viewBounds.halfHeightDeg);
     const obsLat = parseFloat(document.getElementById('obsLat').value) || 41.12;
     const obsLon = parseFloat(document.getElementById('obsLon').value) || 16.87;
 
@@ -2319,8 +2306,6 @@
         inputPoint: { x: dots[i].x, y: dots[i].y, area: dots[i].area },
       })),
       edges: mstEdges,
-      fieldStars: fieldStarsSnapshot,
-      fieldStarsFormat: ['ra_deg','dec_deg','mag','name_or_null'],
       observerDefault: { lat: obsLat, lon: obsLon, label: 'Edit to your own location — see obsLat/obsLon in the app' },
       match: {
         constellationsUsed: conSummary,
@@ -2571,6 +2556,255 @@
     });
   }
 
+  // Loads a remote image (e.g. a classical constellation illustration) as a
+  // <canvas>-drawable <img>, via fetch()+blob rather than a direct cross-origin
+  // <img src>, so a canvas that later composites it is never tainted. Returns
+  // null on any failure (offline, 404, CORS) rather than throwing — the poster
+  // page still works without the picture, same "best effort" spirit as the
+  // conLore/starLore fallbacks in the Viewer.
+  async function loadImageBlob(url){
+    try{
+      const res = await fetch(url);
+      if(!res.ok) return null;
+      const blob = await res.blob();
+      const objUrl = URL.createObjectURL(blob);
+      return await new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = objUrl;
+      });
+    }catch(err){
+      console.error('Failed to load constellation art image:', url, err);
+      return null;
+    }
+  }
+
+  // Apparent magnitude is the only brightness figure every star in the
+  // catalog has — same fallback description as the Viewer's info page
+  // (describeBrightness in constellation-viewer/index.html) for stars
+  // without a STAR_LORE entry.
+  function describeBrightness(mag){
+    if(mag < 0) return 'one of the brightest stars in the night sky';
+    if(mag < 1) return 'very bright';
+    if(mag < 2) return 'bright';
+    if(mag < 3.5) return 'moderately bright';
+    if(mag < 5) return 'faint, visible to the naked eye in dark skies';
+    return 'very faint, near the naked-eye limit';
+  }
+
+  // Builds a second poster page carrying the same text and images as the
+  // Viewer's info page (see buildConstellationStory/buildConstellationAstrology
+  // in constellation-viewer/index.html, which this mirrors) — the mythology,
+  // the astrological reading, the classical artwork, and every star/DSO
+  // description — minus anything button-driven there (the live sky map, the
+  // weather-dependent "best time to view" lookup). Laid out on a canvas whose
+  // height is computed from the actual wrapped text rather than a fixed poster
+  // size, since the amount of curated lore/DSO content varies a lot from one
+  // portrait to the next.
+  async function buildAboutPageCanvas(matchData, title){
+    const W = 1000, MARGIN = 90, CONTENT_W = W - MARGIN*2;
+    const NIGHT_BG = '#03050d';
+    const TEXT_TITLE = '#f3f6ff', TEXT_MUTED = '#8f9bc2', TEXT_LABEL = '#b9c4e8', TEXT_BODY = '#d7deef';
+    const FONT_HEAD = '600 30px -apple-system,sans-serif';
+    const FONT_SUB = '600 19px -apple-system,sans-serif';
+    const FONT_BODY = '17px -apple-system,sans-serif';
+    const FONT_LABEL = '600 14px -apple-system,sans-serif';
+    const LINE_H = 26, LABEL_LINE_H = 20;
+
+    const stars = matchData.stars;
+    const cons = [...new Set(stars.map(s => s.constellation))];
+    const counts = {};
+    for(const s of stars) counts[s.constellation] = (counts[s.constellation]||0)+1;
+    const ranked = [...cons].sort((a,b) => (counts[b]||0)-(counts[a]||0));
+    const primary = ranked[0];
+    const secondary = ranked.slice(1).filter(c => counts[c] > 0);
+
+    // Named stars within radiusDeg of the portrait's own position, bright
+    // enough to matter (mag <= 5.5, same cutoff as the Viewer's
+    // skybackground.js), brightest first. Filters our own already-loaded
+    // full FIELD_STARS catalog rather than a saved-to-JSON snapshot — the map
+    // JSON no longer carries its own fieldStars slice (see the comment above
+    // process()'s lastMatchData assembly); the Viewer gets the same
+    // whole-sky, brightness-capped set from its own static skybackground.js
+    // instead, so both sides define "notable nearby star" the same way
+    // without needing to ship it per order.
+    const nearCra = matchData.projection.tangentRa, nearCdec = matchData.projection.tangentDec;
+    function nearbyNamedStars(radiusDeg){
+      return (window.FIELD_STARS||[])
+        .filter(f => f[3] && f[2] <= 5.5)
+        .filter(f => {
+          if(Math.abs(f[1]-nearCdec) > radiusDeg) return false;
+          const dra = (((f[0]-nearCra+540)%360)-180) * Math.cos(degToRad(nearCdec));
+          return Math.abs(dra) <= radiusDeg;
+        })
+        .sort((a,b) => a[2]-b[2]);
+    }
+    const NEARBY_DEG = 20;
+
+    // Same "prefer a portrait star with lore, else the brightest nearby
+    // named star" pick as pickFeaturedStar() in the Viewer, so both show the
+    // same guiding star for a given constellation.
+    function pickFeaturedStar(){
+      const portraitPick = stars.find(s => window.STAR_LORE && window.STAR_LORE[s.name]);
+      if(portraitPick) return { name: portraitPick.name, lore: window.STAR_LORE[portraitPick.name] };
+      const fieldCandidates = nearbyNamedStars(NEARBY_DEG).filter(f => window.STAR_LORE && window.STAR_LORE[f[3]]);
+      if(fieldCandidates[0]) return { name: fieldCandidates[0][3], lore: window.STAR_LORE[fieldCandidates[0][3]] };
+      return null;
+    }
+
+    const astroText = window.CONSTELLATION_ASTROLOGY && window.CONSTELLATION_ASTROLOGY[primary];
+    const conLore = window.CONSTELLATION_LORE && window.CONSTELLATION_LORE[primary];
+    const featured = pickFeaturedStar();
+    const starCount = stars.length;
+    const avgMag = stars.reduce((sum,s) => sum+s.mag, 0) / starCount;
+    const character = starCount <= 5
+      ? "a spare, essential shape — nothing in it that isn't necessary"
+      : starCount <= 9
+      ? "a balanced shape, neither sparse nor crowded"
+      : "an elaborate, many-threaded shape, built from a whole scattering of stars";
+    const brightness = avgMag < 3
+      ? "made almost entirely of naked-eye-bright stars — bold, hard to miss even from a city"
+      : avgMag < 4.5
+      ? "a mix of bright and quiet stars"
+      : "built from quieter, fainter stars — the kind of pattern you have to know is there to find it";
+    const spansLine = `This portrait spans part of ${cons.length > 1 ? 'the official constellations' : 'the official constellation'} ${cons.join(', ')}.`;
+    const namedField = nearbyNamedStars(NEARBY_DEG).slice(0, 8);
+    const dsoEntries = ranked.flatMap(c => (window.DSO_INFO && window.DSO_INFO[c]) || []);
+
+    const artEntries = ranked.map(c => ({ c, art: window.CONSTELLATION_ART && window.CONSTELLATION_ART[c] })).filter(e => e.art);
+    const images = [];
+    for(const { c, art } of artEntries){
+      const img = await loadImageBlob(art.url);
+      if(img) images.push({ c, art, img });
+    }
+
+    // ---- layout pass: measure everything up front so the canvas (and PDF
+    // page) can be created at exactly the height this content needs ----
+    const measure = document.createElement('canvas').getContext('2d');
+    function wrap(text, font, maxWidth){
+      measure.font = font;
+      const words = String(text).split(/\s+/);
+      const lines = [];
+      let line = '';
+      for(const w of words){
+        const test = line ? line+' '+w : w;
+        if(measure.measureText(test).width > maxWidth && line){ lines.push(line); line = w; }
+        else line = test;
+      }
+      if(line) lines.push(line);
+      return lines;
+    }
+    function paragraph(text, font, color, lineH){
+      const lines = wrap(text, font, CONTENT_W);
+      return { type:'paragraph', lines, font, color, lineH, h: lines.length*lineH + 14 };
+    }
+    function heading(text){
+      return { type:'heading', text, h: 34 };
+    }
+    function starEntry(name, desc){
+      const lines = wrap(desc, FONT_BODY, CONTENT_W);
+      return { type:'starEntry', name, lines, h: 24 + lines.length*LINE_H + 10 };
+    }
+
+    const blocks = [{ type:'title', text: `About ${title}`, h: 46 }];
+
+    if(images.length){
+      const cols = Math.min(images.length, 3), gap = 24;
+      const cardW = (CONTENT_W - gap*(cols-1)) / cols;
+      for(let i=0; i<images.length; i+=cols){
+        const rowImages = images.slice(i, i+cols);
+        const cardH = Math.max(...rowImages.map(({img}) => cardW * img.naturalHeight/img.naturalWidth));
+        blocks.push({ type:'imageRow', images: rowImages, cardW, cardH, gap, h: cardH + 34 });
+      }
+    }
+
+    if(astroText){
+      blocks.push(heading(`About the constellation ${primary}`));
+      blocks.push(paragraph(`${title} is ${astroText}`, FONT_BODY, TEXT_BODY, LINE_H));
+      if(secondary.length === 1){
+        blocks.push(paragraph(`${title} also carries a single star from ${secondary[0]} — a quieter, secondary influence.`, FONT_BODY, TEXT_BODY, LINE_H));
+      } else if(secondary.length > 1){
+        blocks.push(paragraph(`${title} also draws threads from ${secondary.join(', ')} — more than one influence at work.`, FONT_BODY, TEXT_BODY, LINE_H));
+      }
+      if(featured){
+        blocks.push(paragraph(`${title}'s guiding star is ${featured.name} — ${featured.lore}`, FONT_BODY, TEXT_BODY, LINE_H));
+      }
+      blocks.push(paragraph(`${title} is ${character}, and ${brightness}.`, FONT_BODY, TEXT_BODY, LINE_H));
+    }
+
+    blocks.push(heading('The story behind your stars'));
+    blocks.push(paragraph(spansLine, FONT_LABEL, TEXT_LABEL, LABEL_LINE_H));
+    if(conLore) blocks.push(paragraph(conLore, FONT_BODY, TEXT_BODY, LINE_H));
+    if(featured) blocks.push(paragraph(`Nearby shines ${featured.name} — ${featured.lore}`, FONT_BODY, TEXT_BODY, LINE_H));
+
+    blocks.push(heading('Your stars'));
+    for(const s of stars){
+      const lore = window.STAR_LORE && window.STAR_LORE[s.name];
+      blocks.push(starEntry(s.name, lore || `Officially part of the constellation ${s.constellation}. Apparent magnitude ${s.mag} — ${describeBrightness(s.mag)}.`));
+    }
+
+    blocks.push(heading('Other notable stars nearby'));
+    if(namedField.length){
+      for(const [,,mag,fname] of namedField){
+        const lore = window.STAR_LORE && window.STAR_LORE[fname];
+        blocks.push(starEntry(fname, lore || `Apparent magnitude ${mag} — ${describeBrightness(mag)}.`));
+      }
+    } else {
+      blocks.push(paragraph('No other notable named stars nearby.', FONT_BODY, TEXT_MUTED, LINE_H));
+    }
+
+    blocks.push(heading('Further out: galaxies, nebulae, clusters'));
+    if(dsoEntries.length){
+      for(const d of dsoEntries) blocks.push(starEntry(d.name, d.note));
+    } else {
+      blocks.push(paragraph('No notable deep-sky objects catalogued for this area yet.', FONT_BODY, TEXT_MUTED, LINE_H));
+    }
+
+    const TOP_PAD = 70, BOTTOM_PAD = 70, BLOCK_GAP = 18;
+    const H = Math.round(TOP_PAD + blocks.reduce((sum,b) => sum + b.h + BLOCK_GAP, 0) + BOTTOM_PAD);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = NIGHT_BG;
+    ctx.fillRect(0, 0, W, H);
+    ctx.textAlign = 'left';
+
+    let y = TOP_PAD;
+    for(const b of blocks){
+      if(b.type === 'title'){
+        ctx.font = FONT_HEAD; ctx.fillStyle = TEXT_TITLE;
+        ctx.fillText(b.text, MARGIN, y + 32);
+      } else if(b.type === 'heading'){
+        ctx.font = FONT_SUB; ctx.fillStyle = TEXT_TITLE;
+        ctx.fillText(b.text, MARGIN, y + 22);
+        ctx.strokeStyle = 'rgba(143,155,194,0.35)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(MARGIN, y + 34); ctx.lineTo(W-MARGIN, y + 34); ctx.stroke();
+      } else if(b.type === 'paragraph'){
+        ctx.font = b.font; ctx.fillStyle = b.color;
+        b.lines.forEach((line,i) => ctx.fillText(line, MARGIN, y + 18 + i*b.lineH));
+      } else if(b.type === 'starEntry'){
+        ctx.font = FONT_SUB; ctx.fillStyle = TEXT_TITLE;
+        ctx.fillText(b.name, MARGIN, y + 20);
+        ctx.font = FONT_BODY; ctx.fillStyle = TEXT_BODY;
+        b.lines.forEach((line,i) => ctx.fillText(line, MARGIN, y + 20 + LINE_H + i*LINE_H));
+      } else if(b.type === 'imageRow'){
+        let x = MARGIN;
+        for(const { c, art, img } of b.images){
+          const h = b.cardW * img.naturalHeight/img.naturalWidth;
+          ctx.drawImage(img, x, y, b.cardW, h);
+          ctx.font = FONT_LABEL; ctx.fillStyle = TEXT_LABEL;
+          ctx.fillText(`${c} — ${art.source}`, x, y + b.cardH + 20);
+          x += b.cardW + b.gap;
+        }
+      }
+      y += b.h + BLOCK_GAP;
+    }
+
+    return canvas;
+  }
+
   async function saveToOrder(){
     if(!orderContext) throw new Error('No order loaded');
     if(!lastPosterLayers || !lastMatchData) throw new Error('Generate the poster first.');
@@ -2591,6 +2825,11 @@
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ unit: 'px', format: [1000, 1400] });
     pdf.addImage(c, 'PNG', 0, 0, 1000, 1400);
+
+    const aboutCanvas = await buildAboutPageCanvas(lastMatchData, lastMatchData.name);
+    pdf.addPage([aboutCanvas.width, aboutCanvas.height], 'p');
+    pdf.addImage(aboutCanvas, 'PNG', 0, 0, aboutCanvas.width, aboutCanvas.height);
+
     const pdfBlob = pdf.output('blob');
 
     const base = orderContext.customerNo + '/' + orderContext.orderNo + '/' + orderContext.constellationNo + '/';

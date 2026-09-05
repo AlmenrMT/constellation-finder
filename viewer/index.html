@@ -5,11 +5,13 @@
 <title>Constellation Finder — AR Viewer</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <script src="starinfo.js"></script>
+<script src="skybackground.js"></script>
 <script src="starlore.js"></script>
 <script src="dsoinfo.js"></script>
 <script src="constellationart.js"></script>
 <script src="constellationlines.js"></script>
 <script src="constellationlore.js"></script>
+<script src="astrolore.js"></script>
 <style>
   :root{
     --bg:#0b0d12; --panel:#1a1d24; --border:#333844; --text:#eef0f3; --muted:#9aa0ac; --accent:#6ea8fe; --good:#5ee08a; --warn:#ffb04a;
@@ -247,10 +249,14 @@
     <button id="findBestTimeBtn" style="width:100%;">🔭 Find best time to view</button>
     <div id="bestTimeResults"></div>
 
+    <div id="infoArt"></div>
+
+    <h2 id="infoAstrologyHeading" style="margin-top:24px;">About the constellation</h2>
+    <div id="infoAstrology" class="storyText"></div>
+
     <h2 style="margin-top:24px;">The story behind your stars</h2>
     <p class="hint" id="infoConstellations"></p>
     <div id="infoStory" class="storyText"></div>
-    <div id="infoArt"></div>
     <div class="starList" id="infoStars"></div>
 
     <h2 style="margin-top:24px;">Other notable stars nearby</h2>
@@ -371,7 +377,7 @@
   let drawingSpriteMeta = null; // {originDAz, originDAlt, pxPerDegX, pxPerDegY} to place the sprite each frame
   let targetAltAz = null;  // {az, alt} of the constellation's mean position — refreshed periodically
   let starsAltAz = [];     // per-star current alt/az, refreshed alongside targetAltAz
-  let fieldStarsAltAz = []; // background context stars (map.fieldStars), same refresh cycle
+  let fieldStarsAltAz = []; // background context stars (SKY_BACKGROUND_STARS, whole sky), same refresh cycle
   let heading = 0;         // current compass heading the phone/camera faces, degrees, 0=N
   let pitch = 30;          // current altitude the phone/camera points at, degrees above horizon
   let lat = 41.12, lon = 16.87;
@@ -519,7 +525,7 @@
     return `<div class="starEntry"><b>${escapeHtml(s.name)}</b><div class="starMeta">${lines.join(' ')}</div></div>`;
   }
 
-  // Named field stars (fieldStarsFormat: [ra_deg, dec_deg, mag, name_or_null])
+  // Named field stars (SKY_BACKGROUND_STARS format: [ra_deg, dec_deg, mag, name_or_null])
   // are the bright, recognizable stars shown for context around the portrait
   // but not used in it — worth surfacing separately as "what else is nearby".
   function describeFieldStarHtml(f){
@@ -547,6 +553,70 @@
     name => `Every constellation was once new. ${name} joins this old neighborhood of the sky as the latest to be named.`,
   ];
 
+  // How many of the portrait's stars fall in each official constellation —
+  // shared by the story and astrology builders below, since both need to know
+  // which official constellation(s) a portrait actually draws from and in
+  // what proportion.
+  function countStarsByConstellation(){
+    const counts = {};
+    for(const s of map.stars) counts[s.constellation] = (counts[s.constellation]||0)+1;
+    return counts;
+  }
+
+  // The official constellation the portrait draws the most stars from —
+  // shared by the story/astrology builders and the astrology heading below.
+  function pickPrimaryConstellation(cons){
+    const counts = countStarsByConstellation();
+    return [...cons].sort((a,b) => (counts[b]||0)-(counts[a]||0))[0];
+  }
+
+  // The portrait's own center in RA/Dec — same fallback (projection tangent
+  // point, else a plain circular mean of its own stars, needed because RA
+  // wraps at 360° and a plain arithmetic mean can land on the opposite side
+  // of the sky from every star, e.g. 359° and 1° averaging to 180°) used
+  // wherever a "how far is this from the portrait" check is needed.
+  function getConstellationCenter(){
+    return {
+      ra: (map.projection && map.projection.tangentRa) ?? circularMeanDeg(map.stars.map(s=>s.ra)),
+      dec: (map.projection && map.projection.tangentDec) ?? (map.stars.reduce((a,s)=>a+s.dec,0)/map.stars.length),
+    };
+  }
+
+  // Named stars within radiusDeg of the portrait's own position, brightest
+  // first — searches SKY_BACKGROUND_STARS (whole sky, capped to naked-eye-
+  // bright stars, see skybackground.js) rather than the old per-map
+  // fieldStars snapshot, so this proximity filter is what keeps "nearby"
+  // honest now — without it, a plain brightest-first sort over the whole sky
+  // would hand back the same few brightest stars (Sirius, Canopus,
+  // Arcturus...) for every portrait, regardless of where it actually is.
+  // Shared by the featured-star pick below and the "other notable stars
+  // nearby" list.
+  function nearbyNamedStars(radiusDeg){
+    const { ra: cra, dec: cdec } = getConstellationCenter();
+    return (window.SKY_BACKGROUND_STARS||[])
+      .filter(f => f[3])
+      .filter(f => {
+        if(Math.abs(f[1]-cdec) > radiusDeg) return false;
+        const dra = (((f[0]-cra+540)%360)-180) * Math.cos(degToRad(cdec));
+        return Math.abs(dra) <= radiusDeg;
+      })
+      .sort((a,b) => a[2]-b[2]);
+  }
+  const NEARBY_DEG = 20;
+
+  // Picks a named star to feature: prefer one actually used in the portrait;
+  // fall back to the brightest nearby named star (see nearbyNamedStars above)
+  // if none of the portrait's own stars has a lore entry (most portrait
+  // stars are faint Bayer-letter stars). Shared by the story and astrology
+  // builders.
+  function pickFeaturedStar(){
+    const portraitPick = map.stars.find(s => window.STAR_LORE && window.STAR_LORE[s.name]);
+    if(portraitPick) return { name: portraitPick.name, lore: window.STAR_LORE[portraitPick.name] };
+    const fieldCandidates = nearbyNamedStars(NEARBY_DEG).filter(f => window.STAR_LORE && window.STAR_LORE[f[3]]);
+    if(fieldCandidates[0]) return { name: fieldCandidates[0][3], lore: window.STAR_LORE[fieldCandidates[0][3]] };
+    return null;
+  }
+
   // Weaves the official constellation's mythology and a nearby named star's
   // etymology into a short narrative connecting them to the customer's own
   // constellation — replaces a purely scientific rundown with something a
@@ -556,20 +626,12 @@
   // story with only one half of the pairing.
   function buildConstellationStory(cons){
     if(!map || !cons.length) return '';
-    const counts = {};
-    for(const s of map.stars) counts[s.constellation] = (counts[s.constellation]||0)+1;
-    const primary = [...cons].sort((a,b) => (counts[b]||0)-(counts[a]||0))[0];
+    const primary = pickPrimaryConstellation(cons);
     const conLore = window.CONSTELLATION_LORE && window.CONSTELLATION_LORE[primary];
 
-    // Prefer a named star actually used in the portrait; fall back to the
-    // brightest nearby named field star if none of the portrait's own stars
-    // has a lore entry (most portrait stars are faint Bayer-letter stars).
-    const portraitPick = map.stars.find(s => window.STAR_LORE && window.STAR_LORE[s.name]);
-    const fieldCandidates = (map.fieldStars||[])
-      .filter(f => f[3] && window.STAR_LORE && window.STAR_LORE[f[3]])
-      .sort((a,b) => a[2]-b[2]);
-    const starName = portraitPick ? portraitPick.name : (fieldCandidates[0] && fieldCandidates[0][3]);
-    const starLore = starName && window.STAR_LORE[starName];
+    const featured = pickFeaturedStar();
+    const starName = featured && featured.name;
+    const starLore = featured && featured.lore;
 
     if(!conLore && !starLore) return '';
 
@@ -579,6 +641,56 @@
     if(starLore) parts.push(`<p>Nearby shines <b>${escapeHtml(starName)}</b> — ${escapeHtml(starLore)}</p>`);
     const closing = STORY_CLOSING_LINES[stableHash(map.name || primary) % STORY_CLOSING_LINES.length](name);
     parts.push(`<p>${closing}</p>`);
+    return parts.join('');
+  }
+
+  // Builds a personal "astrological reading" from the actual match data for
+  // this specific portrait — never from guessing what the drawing depicts
+  // (a customer's own constellation can be a pet, a house, a name, anything),
+  // since the only thing we reliably know about it is which real stars it's
+  // built from. Draws on: which official constellation(s) it pulls from and
+  // in what proportion (astrolore.js), its featured named star (same pick as
+  // the story above, for a consistent "guiding star" across both sections),
+  // and the shape's own star count and average brightness. Returns '' if the
+  // dominant constellation has no astrolore entry (shouldn't happen — all 88
+  // are covered — but mirrors buildConstellationStory's fail-safe).
+  function buildConstellationAstrology(cons){
+    if(!map || !cons.length) return '';
+    const counts = countStarsByConstellation();
+    const ranked = [...cons].sort((a,b) => (counts[b]||0)-(counts[a]||0));
+    const primary = ranked[0];
+    const astroText = window.CONSTELLATION_ASTROLOGY && window.CONSTELLATION_ASTROLOGY[primary];
+    if(!astroText) return '';
+
+    const name = escapeHtml(map.name || 'This pattern');
+    const parts = [`<p><b>${name}</b> is ${escapeHtml(astroText)}</p>`];
+
+    const secondary = ranked.slice(1).filter(c => counts[c] > 0);
+    if(secondary.length === 1){
+      parts.push(`<p>${name} also carries a single star from <b>${escapeHtml(secondary[0])}</b> — a quieter, secondary influence.</p>`);
+    } else if(secondary.length > 1){
+      parts.push(`<p>${name} also draws threads from <b>${escapeHtml(secondary.join(', '))}</b> — more than one influence at work.</p>`);
+    }
+
+    const featured = pickFeaturedStar();
+    if(featured){
+      parts.push(`<p>${name}'s guiding star is <b>${escapeHtml(featured.name)}</b> — ${escapeHtml(featured.lore)}</p>`);
+    }
+
+    const starCount = map.stars.length;
+    const avgMag = map.stars.reduce((sum,s) => sum + s.mag, 0) / starCount;
+    const character = starCount <= 5
+      ? "a spare, essential shape — nothing in it that isn't necessary"
+      : starCount <= 9
+      ? "a balanced shape, neither sparse nor crowded"
+      : "an elaborate, many-threaded shape, built from a whole scattering of stars";
+    const brightness = avgMag < 3
+      ? "made almost entirely of naked-eye-bright stars — bold, hard to miss even from a city"
+      : avgMag < 4.5
+      ? "a mix of bright and quiet stars"
+      : "built from quieter, fainter stars — the kind of pattern you have to know is there to find it";
+    parts.push(`<p><b>${name}</b> is ${character}, and ${brightness}.</p>`);
+
     return parts.join('');
   }
 
@@ -593,6 +705,8 @@
     document.getElementById('infoConstellations').textContent =
       `This portrait spans part of ${cons.length > 1 ? 'the official constellations' : 'the official constellation'} ${cons.join(', ')}.`;
 
+    document.getElementById('infoAstrologyHeading').textContent = `About the constellation ${pickPrimaryConstellation(cons)}`;
+    document.getElementById('infoAstrology').innerHTML = buildConstellationAstrology(cons);
     document.getElementById('infoStory').innerHTML = buildConstellationStory(cons);
 
     const artEl = document.getElementById('infoArt');
@@ -604,7 +718,7 @@
       </div>
     `).join('')}</div>` : '';
 
-    const namedField = (map.fieldStars || []).filter(f => f[3]).sort((a,b) => a[2]-b[2]).slice(0, 8);
+    const namedField = nearbyNamedStars(NEARBY_DEG).slice(0, 8);
     const fieldEl = document.getElementById('infoFieldStars');
     fieldEl.innerHTML = namedField.length
       ? namedField.map(describeFieldStarHtml).join('')
@@ -659,19 +773,14 @@
     skyMapCanvas.width = Math.max(1, Math.round(rect.width));
     skyMapCanvas.height = Math.max(1, Math.round(rect.height));
 
-    // RA wraps at 360° — a plain mean can land on the opposite side of the
-    // sky from every star (e.g. 359° and 1° averaging to 180°), so this
-    // fallback (only used if a map is missing its own projection) uses a
-    // circular mean instead.
-    const centerRa = (map.projection && map.projection.tangentRa) ?? circularMeanDeg(map.stars.map(s=>s.ra));
-    const centerDec = (map.projection && map.projection.tangentDec) ?? (map.stars.reduce((a,s)=>a+s.dec,0)/map.stars.length);
+    const { ra: centerRa, dec: centerDec } = getConstellationCenter();
 
     // gnomonic() legitimately returns null for anything too far from the
     // tangent point (near/past 90° away) — field stars and DSOs pulled in
     // from a whole constellation can occasionally be that far, so every use
     // of `.g` below has to tolerate null, not just the ones close to center.
     const portraitPts = map.stars.map(s => ({ ...s, g: gnomonic(s.ra, s.dec, centerRa, centerDec) }));
-    const fieldPts = (map.fieldStars||[])
+    const fieldPts = (window.SKY_BACKGROUND_STARS||[])
       .map(f => ({ ra:f[0], dec:f[1], mag:f[2], name:f[3], g: gnomonic(f[0], f[1], centerRa, centerDec) }))
       .filter(f => f.g);
     const cons = [...new Set(map.stars.map(s=>s.constellation))];
@@ -1530,7 +1639,7 @@
     if(!map) return;
     const jd = manualMode ? currentManualJulianDate() : nowJulianDate();
     starsAltAz = map.stars.map(s => ({ ...s, ...raDecToAltAz(s.ra, s.dec, lat, lon, jd) }));
-    fieldStarsAltAz = (map.fieldStars||[]).map(f => {
+    fieldStarsAltAz = (window.SKY_BACKGROUND_STARS||[]).map(f => {
       const aa = raDecToAltAz(f[0], f[1], lat, lon, jd);
       return { ra:f[0], dec:f[1], mag:f[2], name:f[3], az:aa.az, alt:aa.alt };
     });
@@ -1601,8 +1710,14 @@
     // misaligned, against the real ones. With the camera off (drag-to-look,
     // or just before it starts), there's no video, so without this the
     // constellation's own stars would float in isolation against plain
-    // black. Same bounded map.fieldStars snapshot the sky map and story
-    // already use, so nothing new to load.
+    // black. Draws from SKY_BACKGROUND_STARS (whole sky, ~2,600 naked-eye-
+    // bright stars, see skybackground.js) — this used to draw from each
+    // map's own "fieldStars" snapshot instead, a positionally-bounded slice
+    // around just this constellation with no brightness cutoff at all
+    // (12,000+ stars for a single portrait, most fainter than the eye could
+    // ever see), which was both a real per-frame performance cost here and
+    // in renderSkyMap below, and meant the background ran out of stars the
+    // moment you dragged far enough to look away from the portrait.
     if(!cameraActive){
       for(const f of fieldStarsAltAz){
         const p = toScreen(f.az, f.alt);
