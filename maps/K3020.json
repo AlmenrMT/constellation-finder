@@ -2,7 +2,7 @@
   "schema": "constellation-map-v1",
   "id": "K3020",
   "name": "Victoria",
-  "generatedAt": "2026-09-05T13:27:03.536Z",
+  "generatedAt": "2026-09-05T15:47:30.363Z",
   "howToRender": {
     "summary": "Everything needed to redraw this chart and re-align \"drawing\" with the stars, independent of this app.",
     "starProjection": "Place star (ra,dec) at gnomonic(ra, dec, view.centerRa, view.centerDec) -> {x,y} tangent-plane units, then apply your own pan/zoom/scale to pixels.",
@@ -16,13 +16,13 @@
   },
   "projection": {
     "type": "gnomonic",
-    "tangentRa": 63.8181,
-    "tangentDec": -7.6529,
+    "tangentRa": 143.915,
+    "tangentDec": 35.8101,
     "fit": {
-      "sRe": 1748.3414143836874,
+      "sRe": 1685.4076739466132,
       "sIm": 0,
-      "tx": 438.3936362597791,
-      "ty": -512.3002474947792
+      "tx": 350.89548268532826,
+      "ty": -410.5408926511634
     }
   },
   "drawing": {
@@ -31,19 +31,19 @@
     "height": 800
   },
   "view": {
-    "centerRa": 66.70754495940781,
-    "centerDec": -7.857850000000001,
-    "halfWidthDeg": 17.032262145812968,
-    "halfHeightDeg": 15.738521936457769
+    "centerRa": 144.16947869432886,
+    "centerDec": 31.839212500000002,
+    "halfWidthDeg": 18.681835554434947,
+    "halfHeightDeg": 17.180794347238944
   },
   "stars": [
     {
       "id": 0,
-      "name": "Ome Eri",
-      "constellation": "Eridanus",
-      "ra": 73.2236,
-      "dec": -5.4527,
-      "mag": 4.36,
+      "name": "21 LMi",
+      "constellation": "Leo Minor",
+      "ra": 151.8573,
+      "dec": 35.2447,
+      "mag": 4.49,
       "inputPoint": {
         "x": 148.4145728643216,
         "y": 445.5075376884422,
@@ -52,11 +52,11 @@
     },
     {
       "id": 1,
-      "name": "Pi-6 Ori",
-      "constellation": "Orion",
-      "ra": 74.6371,
-      "dec": 1.714,
-      "mag": 4.47,
+      "name": "Mu UMa",
+      "constellation": "Ursa Major",
+      "ra": 155.5823,
+      "dec": 41.4995,
+      "mag": 3.06,
       "inputPoint": {
         "x": 84.41414141414141,
         "y": 209.46212121212122,
@@ -65,11 +65,11 @@
     },
     {
       "id": 2,
-      "name": "Pi Eri",
-      "constellation": "Eridanus",
-      "ra": 56.5356,
-      "dec": -12.1016,
-      "mag": 4.43,
+      "name": "Rho-2 Cnc",
+      "constellation": "Cancer",
+      "ra": 133.9153,
+      "dec": 27.9275,
+      "mag": 5.23,
       "inputPoint": {
         "x": 621.5025252525253,
         "y": 640.540404040404,
@@ -78,11 +78,11 @@
     },
     {
       "id": 3,
-      "name": "Omi-1 Eri",
-      "constellation": "Eridanus",
-      "ra": 62.9664,
-      "dec": -6.8376,
-      "mag": 4.04,
+      "name": "Alp Lyn",
+      "constellation": "Lynx",
+      "ra": 140.2639,
+      "dec": 34.3926,
+      "mag": 3.14,
       "inputPoint": {
         "x": 453.5215189873418,
         "y": 443.5189873417722,
@@ -91,11 +91,11 @@
     },
     {
       "id": 4,
-      "name": "53 Eri",
-      "constellation": "Eridanus",
-      "ra": 69.5451,
-      "dec": -14.304,
-      "mag": 3.86,
+      "name": "Ras Elased Australis",
+      "constellation": "Leo",
+      "ra": 146.4628,
+      "dec": 23.7743,
+      "mag": 2.97,
       "inputPoint": {
         "x": 269.4834605597964,
         "y": 745.5241730279898,
@@ -104,11 +104,11 @@
     },
     {
       "id": 5,
-      "name": "30 Eri",
-      "constellation": "Eridanus",
-      "ra": 58.1736,
-      "dec": -5.3613,
-      "mag": 5.48,
+      "name": "Sig-2 Cnc",
+      "constellation": "Cancer",
+      "ra": 134.2358,
+      "dec": 32.9104,
+      "mag": 5.44,
       "inputPoint": {
         "x": 597.4313725490196,
         "y": 483.5019607843137,
@@ -117,11 +117,11 @@
     },
     {
       "id": 6,
-      "name": "39 Eri",
-      "constellation": "Eridanus",
-      "ra": 63.5987,
-      "dec": -10.2563,
-      "mag": 4.87,
+      "name": "Tau Cnc",
+      "constellation": "Cancer",
+      "ra": 137.0002,
+      "dec": 29.6542,
+      "mag": 5.42,
       "inputPoint": {
         "x": 513.5,
         "y": 577.5932203389831,
@@ -130,11 +130,11 @@
     },
     {
       "id": 7,
-      "name": "63 Eri",
-      "constellation": "Eridanus",
-      "ra": 74.9602,
-      "dec": -10.2633,
-      "mag": 5.39,
+      "name": "23 LMi",
+      "constellation": "Leo Minor",
+      "ra": 154.0602,
+      "dec": 29.3105,
+      "mag": 5.49,
       "inputPoint": {
         "x": 105.5,
         "y": 614.5,
@@ -178,10 +178,10 @@
     "label": "Edit to your own location — see obsLat/obsLon in the app"
   },
   "match": {
-    "constellationsUsed": "Eridanus, Orion",
-    "accuracyResidual": 0.021681669847287952,
-    "intensityResidual": 0.12652128621986347,
-    "combinedScore": 0.08494231295721968,
+    "constellationsUsed": "Leo Minor, Ursa Major, Cancer, Lynx, Leo",
+    "accuracyResidual": 0.006274540192103996,
+    "intensityResidual": 0.19373188308285022,
+    "combinedScore": 0.1031404817335291,
     "intensityWeight": 0.5
   },
   "otherCandidates": [
