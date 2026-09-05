@@ -2737,10 +2737,14 @@
       return { type:'starEntry', name, nameFont: FONT_SUB, font: FONT_BODY, color: TEXT_BODY, lineH: LINE_H, lines, h: ENTRY_NAME_H + lines.length*LINE_H + ENTRY_GAP };
     }
 
-    const blocks = [{ type:'title', text: `About ${title}`, font: FONT_HEAD, h: TITLE_H }];
+    const blocks = [{ type:'title', text: `About the constellation ${title}`, font: FONT_HEAD, h: TITLE_H }];
 
-    // 1) The astrological reading first — no image here, this section is
-    // purely the character read, not the mythology.
+    // The story behind your stars — which official constellation(s) it
+    // spans, then that constellation's astrological character read, then
+    // its myth and classical artwork together, then the guiding star, and
+    // only then the star-by-star breakdown.
+    blocks.push(heading('The story behind your stars'));
+    blocks.push(paragraph(spansLine, FONT_LABEL, TEXT_LABEL, LABEL_LINE_H));
     if(astroText){
       blocks.push(heading(`About the constellation ${primary}`));
       blocks.push(paragraph(`${title} is ${astroText}`, FONT_BODY, TEXT_BODY, LINE_H));
@@ -2751,13 +2755,6 @@
       }
       blocks.push(paragraph(`${title} is ${character}, and ${brightness}.`, FONT_BODY, TEXT_BODY, LINE_H));
     }
-
-    // 2) The story behind your stars — the official constellation's myth and
-    // its classical artwork together, followed by the guiding star (this is
-    // the section that owns the featured star; the astrology section above
-    // doesn't repeat it), and only then the star-by-star breakdown.
-    blocks.push(heading('The story behind your stars'));
-    blocks.push(paragraph(spansLine, FONT_LABEL, TEXT_LABEL, LABEL_LINE_H));
     if(conLore) blocks.push(paragraph(conLore, FONT_BODY, TEXT_BODY, LINE_H));
     if(images.length){
       const cols = Math.min(images.length, 3);
