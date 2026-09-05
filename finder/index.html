@@ -2863,13 +2863,20 @@
   // rather than growing the page.
   async function buildAboutPageCanvas(matchData, title){
     const PAGE_H = 1400;
-    const artEntries = [...new Set(matchData.stars.map(s => s.constellation))]
-      .map(c => ({ c, art: window.CONSTELLATION_ART && window.CONSTELLATION_ART[c] }))
-      .filter(e => e.art);
+    // Only the primary constellation's artwork — the myth text below (see
+    // layoutAboutPage's conLore) is only ever shown for the primary
+    // constellation too, and a picture with no description under it (a real
+    // bug: a secondary constellation used to get its art shown here with no
+    // matching text) is worse than one fewer picture.
+    const primaryCounts = {};
+    for(const s of matchData.stars) primaryCounts[s.constellation] = (primaryCounts[s.constellation]||0)+1;
+    const primaryCon = [...new Set(matchData.stars.map(s => s.constellation))]
+      .sort((a,b) => (primaryCounts[b]||0)-(primaryCounts[a]||0))[0];
+    const primaryArt = window.CONSTELLATION_ART && window.CONSTELLATION_ART[primaryCon];
     const images = [];
-    for(const { c, art } of artEntries){
-      const img = await loadImageBlob(art.url);
-      if(img) images.push({ c, art, img });
+    if(primaryArt){
+      const img = await loadImageBlob(primaryArt.url);
+      if(img) images.push({ c: primaryCon, art: primaryArt, img });
     }
 
     // Try full size first, then shrink text/images together in a couple of

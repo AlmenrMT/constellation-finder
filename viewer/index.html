@@ -709,8 +709,13 @@
     document.getElementById('infoAstrology').innerHTML = buildConstellationAstrology(cons);
     document.getElementById('infoStory').innerHTML = buildConstellationStory(cons);
 
+    // Only the primary constellation's artwork — buildConstellationStory
+    // above only ever shows myth text for the primary constellation too, so
+    // showing every spanned constellation's picture here used to leave a
+    // secondary constellation's artwork with no description under it.
     const artEl = document.getElementById('infoArt');
-    const artEntries = cons.map(c => ({ c, art: window.CONSTELLATION_ART && window.CONSTELLATION_ART[c] })).filter(e => e.art);
+    const artPrimary = pickPrimaryConstellation(cons);
+    const artEntries = [{ c: artPrimary, art: window.CONSTELLATION_ART && window.CONSTELLATION_ART[artPrimary] }].filter(e => e.art);
     artEl.innerHTML = artEntries.length ? `<div class="artCards">${artEntries.map(({c, art}) => `
       <div class="artCard">
         <img src="${escapeHtml(art.url)}" alt="Traditional depiction of ${escapeHtml(c)}" loading="lazy">
