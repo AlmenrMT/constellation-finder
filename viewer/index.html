@@ -180,6 +180,7 @@
       <div class="sub" id="targetSub">—</div>
     </div>
     <div style="display:flex; gap:8px;">
+      <button id="shareBtn" title="Share">↗</button>
       <button id="infoBtn">ⓘ</button>
       <button id="gearBtn">⚙︎</button>
     </div>
@@ -243,6 +244,9 @@
     </div>
     <button id="skyMapLineToggle" style="margin-top:8px; width:100%;">Show the official constellation outline instead</button>
     <p class="hint" style="margin-top:6px;">Drag to pan, pinch or scroll to zoom — stays near the constellation. Tap any star for details.</p>
+
+    <h2 style="margin-top:24px;">Visibility from here</h2>
+    <p class="hint" id="visibilityStat">Figuring out how often this is visible from your location…</p>
 
     <h2 style="margin-top:24px;">Best time to view</h2>
     <p class="hint">Finds the next week's darkest, highest-in-the-sky windows for this constellation, and checks the cloud forecast for each.</p>
@@ -385,6 +389,29 @@
   let fovH = 65;
   let rafPending = false;
   let cameraActive = false;      // is getUserMedia currently live
+
+  // ---------- locally-persisted preferences ----------
+  // This is meant to be reopened over months, not once — remembering display
+  // settings and the last confirmed real location (never sent anywhere, just
+  // localStorage) means a repeat visit doesn't reset every toggle and show a
+  // generic default location before GPS/compass have even had a chance to
+  // answer.
+  const PREFS_KEY = 'constellationViewerPrefs';
+  function loadPrefs(){
+    try{ return JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; }catch(err){ return {}; }
+  }
+  function savePrefs(patch){
+    try{ localStorage.setItem(PREFS_KEY, JSON.stringify({ ...loadPrefs(), ...patch })); }
+    catch(err){ /* private browsing / storage disabled — settings just won't stick */ }
+  }
+  const savedPrefs = loadPrefs();
+  if(savedPrefs.lat != null && savedPrefs.lon != null){ lat = savedPrefs.lat; lon = savedPrefs.lon; }
+  if(savedPrefs.showNames != null) document.getElementById('showNames').checked = savedPrefs.showNames;
+  if(savedPrefs.showDrawing != null) document.getElementById('showDrawing').checked = savedPrefs.showDrawing;
+  if(savedPrefs.drawOpacity != null){
+    document.getElementById('drawOpacity').value = savedPrefs.drawOpacity;
+    document.getElementById('drawOpacityVal').textContent = savedPrefs.drawOpacity.toFixed(2);
+  }
   let cameraTransition = false;  // guards against overlapping start/stop calls
   let lastCameraCheck = 0;
 
@@ -471,11 +498,21 @@
     document.getElementById('summaryTitle').textContent = map.name || summarizeStars(map.stars);
     document.getElementById('summarySub').textContent = `${map.stars.length} stars · ${sourceLabel}`;
     buildInfoPanel();
-    if(map.observerDefault){
+    // A previously-confirmed real location (see savedPrefs above) is more
+    // useful than this poster's own observerDefault — that default is just
+    // wherever the order was made, not where this viewer actually is — so
+    // it only applies when nothing better is already known. Real GPS, once
+    // it reports in (startGeolocation), still overrides either.
+    if(savedPrefs.lat != null && savedPrefs.lon != null){
+      lat = savedPrefs.lat; lon = savedPrefs.lon;
+      document.getElementById('manLat').value = lat;
+      document.getElementById('manLon').value = lon;
+    } else if(map.observerDefault){
       lat = map.observerDefault.lat; lon = map.observerDefault.lon;
       document.getElementById('manLat').value = lat;
       document.getElementById('manLon').value = lon;
     }
+    refreshVisibilityStat();
     if(map.drawing){
       const img = new Image();
       img.onload = () => { drawingImg = img; buildDrawingGrid(); };
@@ -510,18 +547,25 @@
   }
 
   // The story/etymology behind a star's name (see starlore.js) reads far
-  // better to a customer than its spectral type and distance in light-years
-  // — shown instead of the scientific facts (still in starinfo.js/STAR_INFO,
-  // kept around in case something elsewhere ever wants it) wherever a star
-  // is well-documented enough to have one. Everything else still gets name,
-  // constellation, and a plain-language brightness description from its
-  // magnitude (which every star in the catalog has), rather than a guessed
-  // fact.
+  // better to a customer than its spectral type — shown instead of that,
+  // wherever a star is well-documented enough to have one. Distance in
+  // light-years (starinfo.js/STAR_INFO), though, is worth surfacing
+  // alongside either the lore or the plain magnitude fallback: it's the one
+  // concrete "how far away is this, really" fact a customer can't get from
+  // the name or the sky itself.
+  function distanceLine(name){
+    const info = window.STAR_INFO && window.STAR_INFO[name];
+    if(!info || info.distanceLy == null) return '';
+    return `${info.distanceLy} light-years away.`;
+  }
+
   function describeStarHtml(s){
     const lore = (window.STAR_LORE && window.STAR_LORE[s.name]) || null;
     const lines = [`Officially part of the constellation <b>${escapeHtml(s.constellation)}</b>.`];
     if(lore) lines.push(escapeHtml(lore));
     else lines.push(`Apparent magnitude ${s.mag} — ${describeBrightness(s.mag)}.`);
+    const dist = distanceLine(s.name);
+    if(dist) lines.push(dist);
     return `<div class="starEntry"><b>${escapeHtml(s.name)}</b><div class="starMeta">${lines.join(' ')}</div></div>`;
   }
 
@@ -533,6 +577,8 @@
     if(!name) return '';
     const lore = (window.STAR_LORE && window.STAR_LORE[name]) || null;
     const lines = [lore ? escapeHtml(lore) : `Apparent magnitude ${mag} — ${describeBrightness(mag)}.`];
+    const dist = distanceLine(name);
+    if(dist) lines.push(dist);
     return `<div class="starEntry"><b>${escapeHtml(name)}</b><div class="starMeta">${lines.join(' ')}</div></div>`;
   }
 
@@ -748,15 +794,20 @@
   // Which line set the sky map draws: the portrait's own connections
   // (default) or the traditional official-constellation outline — never
   // both at once (see the toggle button below and its use in renderSkyMap).
-  let skyMapShowClassical = false;
-  document.getElementById('skyMapLineToggle').addEventListener('click', () => {
-    skyMapShowClassical = !skyMapShowClassical;
+  let skyMapShowClassical = savedPrefs.skyMapShowClassical || false;
+  function applySkyMapLineMode(){
     document.getElementById('skyMapLineToggle').textContent = skyMapShowClassical
       ? 'Show your constellation instead'
       : 'Show the official constellation outline instead';
     document.getElementById('skyMapLineLegend').innerHTML = skyMapShowClassical
       ? '<span style="color:#b4a0ff;">┈</span> official constellation outline'
       : '<span style="color:#ffd76a;">━</span> your constellation';
+  }
+  applySkyMapLineMode();
+  document.getElementById('skyMapLineToggle').addEventListener('click', () => {
+    skyMapShowClassical = !skyMapShowClassical;
+    savePrefs({ skyMapShowClassical });
+    applySkyMapLineMode();
     hideSkyMapPopup();
     renderSkyMap();
   });
@@ -1217,6 +1268,8 @@
       lat = pos.coords.latitude; lon = pos.coords.longitude;
       document.getElementById('manLat').value = lat.toFixed(4);
       document.getElementById('manLon').value = lon.toFixed(4);
+      savePrefs({ lat, lon });
+      refreshVisibilityStat();
     }, err => {
       setSensorStatus('Location unavailable (' + err.message + ') — switch on manual controls to set it yourself.');
     }, { enableHighAccuracy:false, maximumAge:30000, timeout:15000 });
@@ -1555,6 +1608,8 @@
   ['manLat','manLon'].forEach(id => document.getElementById(id).addEventListener('change', () => {
     lat = parseFloat(document.getElementById('manLat').value);
     lon = parseFloat(document.getElementById('manLon').value);
+    savePrefs({ lat, lon });
+    refreshVisibilityStat();
     refreshAstro();
   }));
   ['manDate','manTime','manTz'].forEach(id => document.getElementById(id).addEventListener('change', refreshAstro));
@@ -1566,11 +1621,35 @@
   });
   document.getElementById('drawOpacity').addEventListener('input', e => {
     document.getElementById('drawOpacityVal').textContent = parseFloat(e.target.value).toFixed(2);
+    savePrefs({ drawOpacity: parseFloat(e.target.value) });
     scheduleRender();
   });
-  document.getElementById('showNames').addEventListener('change', scheduleRender);
-  document.getElementById('showDrawing').addEventListener('change', scheduleRender);
+  document.getElementById('showNames').addEventListener('change', e => {
+    savePrefs({ showNames: e.target.checked });
+    scheduleRender();
+  });
+  document.getElementById('showDrawing').addEventListener('change', e => {
+    savePrefs({ showDrawing: e.target.checked });
+    scheduleRender();
+  });
   document.getElementById('gearBtn').addEventListener('click', () => { document.getElementById('settingsPanel').style.display='block'; });
+
+  // Shares the exact URL this viewer is already open at (?map=... and all)
+  // — native share sheet where available (mobile Safari/Chrome), otherwise
+  // copy-to-clipboard with a brief on-button confirmation. This is meant to
+  // be shown off, and before there's any real marketing, every share is a
+  // free, organic one.
+  document.getElementById('shareBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('shareBtn');
+    const shareData = { title: map && map.name ? `${map.name} — a real constellation` : 'A real constellation', url: location.href };
+    try{
+      if(navigator.share){ await navigator.share(shareData); return; }
+      await navigator.clipboard.writeText(location.href);
+      const original = btn.textContent;
+      btn.textContent = '✓';
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    }catch(err){ /* share sheet dismissed, or clipboard denied — nothing to show for either */ }
+  });
   document.getElementById('closeSettingsBtn').addEventListener('click', () => { document.getElementById('settingsPanel').style.display='none'; });
   document.getElementById('infoBtn').addEventListener('click', () => {
     document.getElementById('infoPanel').style.display='block';
@@ -1619,7 +1698,7 @@
   }
 
   document.getElementById('fovVal').textContent = fovH+'°';
-  document.getElementById('drawOpacityVal').textContent = '0.80';
+  document.getElementById('drawOpacityVal').textContent = parseFloat(document.getElementById('drawOpacity').value).toFixed(2);
   document.getElementById('manHeadingVal').textContent = '0°';
   document.getElementById('manPitchVal').textContent = '30°';
 
@@ -1638,6 +1717,97 @@
   function meanTargetAltAz(jd){
     const altAz = map.stars.map(s => raDecToAltAz(s.ra, s.dec, lat, lon, jd));
     return { az: circularMeanDeg(altAz.map(a=>a.az)), alt: altAz.reduce((a,s)=>a+s.alt,0)/altAz.length };
+  }
+
+  // ---------- year-round visibility stat ----------
+  // Low-precision solar RA/Dec (good to a small fraction of a degree — far
+  // more than enough to decide "is it dark yet"), the same compact formula
+  // family used across amateur-astronomy code (e.g. Paul Schlyter's "How to
+  // compute planetary positions").
+  function sunEquatorial(jd){
+    const d = jd - 2451545.0;
+    const g = degToRad(((357.529 + 0.98560028*d)%360+360)%360);
+    const q = ((280.459 + 0.98564736*d)%360+360)%360;
+    const L = degToRad(((q + 1.915*Math.sin(g) + 0.020*Math.sin(2*g))%360+360)%360);
+    const e = degToRad(23.439 - 0.00000036*d);
+    const ra = (radToDeg(Math.atan2(Math.cos(e)*Math.sin(L), Math.cos(L)))+360)%360;
+    const dec = radToDeg(Math.asin(Math.sin(e)*Math.sin(L)));
+    return { ra, dec };
+  }
+
+  const NIGHT_SUN_ALT = -12;  // nautical twilight — dark enough to actually stargaze
+  const VISIBLE_ALT = 20;     // degrees above horizon — clear of typical rooflines/trees/haze
+
+  // Samples roughly once a week and twice an hour across a full year (~2,500
+  // points) rather than every night — plenty to average out day-to-day noise
+  // for a "how often, overall" figure, at a small fraction of the cost of a
+  // day-by-day scan. Reuses meanTargetAltAz (same "where's the constellation"
+  // definition as the live view and "best time to view") and a fresh sun
+  // position per sampled day (the sun barely moves within one day, so it's
+  // not worth recomputing per time-step).
+  function computeVisibilityStats(){
+    if(!map) return null;
+    const year = new Date().getUTCFullYear();
+    const startJd = julianDate(year, 1, 1, 0);
+    const DAY_STEP = 7, HOUR_STEP = 0.5;
+    let nightTotal = 0, nightVisible = 0;
+    const monthNight = new Array(12).fill(0), monthVisible = new Array(12).fill(0);
+    for(let day = 0; day < 365; day += DAY_STEP){
+      const jdDay = startJd + day;
+      const sun = sunEquatorial(jdDay);
+      const monthIdx = new Date(Date.UTC(year, 0, 1+day)).getUTCMonth();
+      for(let h = 0; h < 24; h += HOUR_STEP){
+        const jd = jdDay + h/24;
+        const sunAlt = raDecToAltAz(sun.ra, sun.dec, lat, lon, jd).alt;
+        if(sunAlt >= NIGHT_SUN_ALT) continue;
+        nightTotal++; monthNight[monthIdx]++;
+        if(meanTargetAltAz(jd).alt >= VISIBLE_ALT){ nightVisible++; monthVisible[monthIdx]++; }
+      }
+    }
+    if(nightTotal === 0) return null;
+    return {
+      pct: Math.round(100*nightVisible/nightTotal),
+      monthPct: monthNight.map((n,i) => n ? monthVisible[i]/n : 0),
+    };
+  }
+
+  const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  // Longest contiguous run of months at or above 60% of the single best
+  // month's visibility — wraps across the Dec→Jan boundary, since a
+  // winter-favoring constellation's best run often straddles it.
+  function describeBestSeason(monthPct){
+    const peak = Math.max(...monthPct);
+    if(peak < 0.05) return null;
+    const isGood = monthPct.map(p => p >= peak*0.6);
+    if(isGood.every(Boolean)) return 'visible on dark nights year-round';
+    let bestRun = [];
+    for(let start=0; start<12; start++){
+      if(!isGood[start]) continue;
+      const run = [start];
+      let i = (start+1)%12;
+      while(isGood[i] && run.length<12){ run.push(i); i=(i+1)%12; }
+      if(run.length > bestRun.length) bestRun = run;
+    }
+    if(!bestRun.length) return null;
+    const first = MONTH_NAMES[bestRun[0]], last = MONTH_NAMES[bestRun[bestRun.length-1]];
+    return first === last ? `best seen in ${first}` : `best seen ${first}–${last}`;
+  }
+
+  // Recomputes only when the location has actually moved (~20km) — GPS
+  // jitter fires this constantly via watchPosition, and re-sampling a whole
+  // year is real (if small) work not worth repeating for a few meters.
+  let lastVisibilityLat = null, lastVisibilityLon = null;
+  function refreshVisibilityStat(){
+    const statEl = document.getElementById('visibilityStat');
+    if(!statEl || !map) return;
+    if(lastVisibilityLat != null && Math.abs(lat-lastVisibilityLat) < 0.2 && Math.abs(lon-lastVisibilityLon) < 0.2) return;
+    lastVisibilityLat = lat; lastVisibilityLon = lon;
+    const stats = computeVisibilityStats();
+    if(!stats){ statEl.textContent = ''; return; }
+    const season = describeBestSeason(stats.monthPct);
+    statEl.textContent = `From your location, this clears ${VISIBLE_ALT}° above the horizon for about ${stats.pct}% of dark hours across the year`
+      + (season ? ` — ${season}.` : '.');
   }
 
   function refreshAstro(){
