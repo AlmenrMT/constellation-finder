@@ -1209,6 +1209,22 @@
       }
       return max;
     }
+    // True set equality (same stars, same count) with any already-published
+    // constellation — a hard, absolute check, unlike maxOverlapWithRegistry's
+    // percentage (which is really "how much of THIS match's stars are found
+    // in that one prior entry", so it can already read 100% for a smaller
+    // match that's merely a subset of a bigger prior one). This is the one
+    // guarantee that must never be a matter of degree: two different
+    // customers must never be handed the literal same constellation.
+    function isExactDuplicate(matchedStars, registry){
+      if(!registry || !registry.length) return false;
+      const names = matchedStars.map(s=>s.name);
+      for(const entry of registry){
+        if(entry.stars.size !== names.length) continue;
+        if(names.every(nm => entry.stars.has(nm))) return true;
+      }
+      return false;
+    }
     function findBestStarMatches(targetPts, intensities, intensityWeight, registry, stars){
       if(!stars || !stars.length) return [];
       const n = targetPts.length;
@@ -1254,11 +1270,21 @@
       }
       kept.forEach(r => delete r._names);
 
+      // Hard floor first, unconditionally: never return a literal duplicate
+      // of an already-published constellation, no matter what else follows.
+      // This is deliberately separate from (and stricter than) the
+      // similarity preference below, which is a quality/diversity nudge, not
+      // a safety net — it can still fall back to its least-bad option under
+      // pressure, but "least-bad" must never mean "identical to one already
+      // sold."
+      const noDupes = kept.filter(r => !isExactDuplicate(r.matchedStars, registry));
+      if(!noDupes.length) return []; // every candidate is a repeat — extremely unlikely; see process()'s empty-results handling
+
       const SIMILARITY_LIMIT = 0.7;
-      kept.forEach(r => { r.registrySimilarity = maxOverlapWithRegistry(r.matchedStars, registry); });
-      const underLimit = kept.filter(r => r.registrySimilarity < SIMILARITY_LIMIT);
+      noDupes.forEach(r => { r.registrySimilarity = maxOverlapWithRegistry(r.matchedStars, registry); });
+      const underLimit = noDupes.filter(r => r.registrySimilarity < SIMILARITY_LIMIT);
       if(underLimit.length) return underLimit;
-      return kept.slice().sort((a,b) => a.registrySimilarity-b.registrySimilarity || a.combinedScore-b.combinedScore);
+      return noDupes.slice().sort((a,b) => a.registrySimilarity-b.registrySimilarity || a.combinedScore-b.combinedScore);
     }
     self.onmessage = (e) => {
       const { id, targetPts, intensities, weight, registry, stars } = e.data;
