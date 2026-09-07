@@ -2919,6 +2919,23 @@
     return drawAboutPage(layout, PAGE_H);
   }
 
+  // Persists a generation failure onto the order's row so admin.html's order
+  // list can show *why* an item is stuck, not just that it is — see
+  // migration-5-order-tracking.sql. Best-effort: if this write itself fails,
+  // the caller's own error is still what surfaces to the person watching
+  // this page, so a console log is enough here rather than compounding the
+  // failure.
+  async function recordGenerationError(message){
+    if(!orderContext) return;
+    try{
+      await supabaseOrders.from('constellations')
+        .update({ generation_error: message })
+        .eq('id', orderContext.rowId);
+    }catch(err){
+      console.error('Could not record generation error:', err);
+    }
+  }
+
   async function saveToOrder(){
     if(!orderContext) throw new Error('No order loaded');
     if(!lastPosterLayers || !lastMatchData) throw new Error('Generate the poster first.');
@@ -2954,12 +2971,12 @@
     const base = orderContext.customerNo + '/' + orderContext.orderNo + '/' + orderContext.constellationNo + '/';
     const { error: posterErr } = await supabaseOrders.storage.from('posters')
       .upload(base + 'poster.pdf', pdfBlob, { contentType: 'application/pdf', upsert: true });
-    if(posterErr) throw posterErr;
+    if(posterErr){ await recordGenerationError(posterErr.message || String(posterErr)); throw posterErr; }
 
     const jsonBlob = new Blob([JSON.stringify(lastMatchData, null, 2)], { type: 'application/json' });
     const { error: jsonErr } = await supabaseOrders.storage.from('posters')
       .upload(base + 'constellation.json', jsonBlob, { contentType: 'application/json', upsert: true });
-    if(jsonErr) throw jsonErr;
+    if(jsonErr){ await recordGenerationError(jsonErr.message || String(jsonErr)); throw jsonErr; }
 
     // Also publish the map JSON to the public maps/ folder (via the
     // publish-constellation Edge Function — see the comment above the manual
@@ -2981,8 +2998,15 @@
       console.error('Auto-publish to viewer failed:', err);
     }
 
+    // A successful generate always clears any previous generation_error —
+    // even a non-fatal publish failure replaces it rather than stacking, so
+    // admin.html's error badge always reflects the most recent attempt only.
     const { error: dbErr } = await supabaseOrders.from('constellations')
-      .update({ poster_path: base + 'poster.pdf', viewer_json_path: base + 'constellation.json' })
+      .update({
+        poster_path: base + 'poster.pdf',
+        viewer_json_path: base + 'constellation.json',
+        generation_error: publishError,
+      })
       .eq('id', orderContext.rowId);
     if(dbErr) throw dbErr;
 
@@ -3027,6 +3051,7 @@
     const matched = await waitForMatch(20000);
     if(!matched){
       statusEl.textContent = 'Auto-generate timed out waiting for a sky match — open this order normally to check it.';
+      await recordGenerationError('Timed out waiting for a match');
       notifyParent(false, 'Timed out waiting for a match');
       return;
     }
@@ -3042,6 +3067,7 @@
       }
     }catch(err){
       statusEl.textContent = 'Auto-generate failed: ' + (err.message || err);
+      await recordGenerationError(err.message || String(err));
       notifyParent(false, err.message || String(err));
     }
   }

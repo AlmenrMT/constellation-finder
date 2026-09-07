@@ -97,6 +97,22 @@
   .reorder-btns{ display:flex; gap:6px; align-items:center; }
   .reorder-btns button{ background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:5px 11px; border-radius:6px; cursor:pointer; font-size:14px; }
   .reorder-btns button:disabled{ opacity:.35; cursor:default; }
+
+  #orderList{ overflow-x:auto; }
+  .order-table{ width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+  .order-table th{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); padding:12px 14px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  .order-table td{ padding:12px 14px; border-bottom:1px solid var(--border); font-size:13.5px; vertical-align:middle; }
+  .order-table tr:last-child td{ border-bottom:none; }
+  .order-table tr.order-row{ cursor:pointer; }
+  .order-table tr.order-row:hover{ background:var(--panel2); }
+  .order-table .row-sub{ font-size:11.5px; color:var(--muted); margin-top:2px; }
+  .issue-badge{ display:inline-block; padding:3px 9px; border-radius:999px; font-size:12px; font-weight:600; cursor:help; white-space:nowrap; }
+  .issue-badge.warn{ background:rgba(245,193,90,.15); color:var(--warn); }
+  .issue-badge.error{ background:rgba(255,138,138,.15); color:var(--bad); }
+  .issue-none{ color:var(--muted); }
+
+  #orderDetailOverlay .modal{ max-width:760px; }
+  #orderDetailOverlay .order-card{ background:none; border:none; padding:0; margin:0; }
 </style>
 </head>
 <body>
@@ -175,6 +191,15 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="orderDetailOverlay">
+  <div class="modal">
+    <div id="orderDetailBody"></div>
+    <div class="modal-actions">
+      <button type="button" class="cancel-btn" id="closeOrderDetailBtn">Close</button>
+    </div>
+  </div>
+</div>
+
 <template id="newItemTemplate">
   <div class="modal-item">
     <div class="item-row">
@@ -232,6 +257,22 @@
   });
 
   let allOrders = [];
+
+  // ---------- order detail popup ----------
+  const orderDetailOverlay = document.getElementById('orderDetailOverlay');
+  const orderDetailBody = document.getElementById('orderDetailBody');
+
+  async function openOrderDetailModal(order){
+    orderDetailBody.innerHTML = '';
+    orderDetailBody.appendChild(await renderOrderCard(order));
+    orderDetailOverlay.classList.add('show');
+  }
+  function closeOrderDetailModal(){
+    orderDetailOverlay.classList.remove('show');
+    renderOrderList();
+  }
+  document.getElementById('closeOrderDetailBtn').addEventListener('click', closeOrderDetailModal);
+  orderDetailOverlay.addEventListener('click', (e) => { if(e.target === orderDetailOverlay) closeOrderDetailModal(); });
 
   // ---------- add order manually ----------
   const addOrderOverlay = document.getElementById('addOrderOverlay');
@@ -515,7 +556,95 @@
     await renderOrderList();
   }
 
-  async function renderOrderList(){
+  // How long a paid item can sit with a line drawing uploaded but no poster
+  // yet before admin.html calls it out as "taking longer than expected" —
+  // separate from an actual generation_error, which is always shown
+  // regardless of elapsed time. PDF orders get a much tighter window than
+  // framed ones since a PDF has no physical production step to account for.
+  const STUCK_HOURS = { pdf: 2, framed: 48 };
+
+  function constellationIssue(c){
+    if(c.generation_error) return { severity: 'error', message: c.generation_error };
+    if(c.line_drawing_path && !c.poster_path && c.line_drawing_uploaded_at){
+      const hours = (Date.now() - new Date(c.line_drawing_uploaded_at).getTime()) / 3600000;
+      const threshold = STUCK_HOURS[c.product_type] ?? STUCK_HOURS.framed;
+      if(hours >= threshold){
+        const elapsed = hours >= 48 ? Math.round(hours / 24) + 'd' : Math.round(hours) + 'h';
+        return { severity: 'warn', message: `No poster ${elapsed} after the line drawing was uploaded` };
+      }
+    }
+    return null;
+  }
+
+  function orderIssue(order){
+    const issues = (order.constellations || []).map(constellationIssue).filter(Boolean);
+    if(!issues.length) return null;
+    const worst = issues.find(i => i.severity === 'error') || issues[0];
+    const extra = issues.length > 1 ? ` (+${issues.length - 1} more)` : '';
+    return { severity: worst.severity, message: worst.message + extra };
+  }
+
+  function titleSummary(constellations){
+    if(!constellations.length) return '(no items)';
+    if(constellations.length === 1) return constellations[0].title || '(untitled)';
+    return `${constellations[0].title || '(untitled)'} +${constellations.length - 1} more`;
+  }
+
+  function productSummary(constellations){
+    if(!constellations.length) return '–';
+    const types = new Set(constellations.map(c => c.product_type));
+    if(types.size > 1) return 'Mixed';
+    return constellations[0].product_type === 'framed' ? 'Framed' : 'PDF';
+  }
+
+  function renderOrderRow(order){
+    const customer = order.customers;
+    const constellations = order.constellations || [];
+    const issue = orderIssue(order);
+
+    const tr = document.createElement('tr');
+    tr.className = 'order-row';
+    tr.innerHTML = `
+      <td>${escapeAttr(titleSummary(constellations))}<div class="row-sub">${order.order_no} · ${customer.customer_no}</div></td>
+      <td>${escapeAttr(customer.email)}</td>
+      <td>${productSummary(constellations)}</td>
+      <td>
+        <select class="status-select">
+          ${STATUSES.map(s => `<option value="${s}" ${s === order.status ? 'selected' : ''}>${s}</option>`).join('')}
+        </select>
+      </td>
+      <td>${issue
+        ? `<span class="issue-badge ${issue.severity}" title="${escapeAttr(issue.message)}">${issue.severity === 'error' ? '⚠ Error' : '⏳ Delayed'}</span>`
+        : '<span class="issue-none">–</span>'}</td>
+      <td><button type="button" class="delete-order-btn">Delete</button></td>
+    `;
+
+    const statusSelect = tr.querySelector('.status-select');
+    statusSelect.addEventListener('click', (e) => e.stopPropagation());
+    statusSelect.addEventListener('change', async (e) => {
+      const { error } = await supabase.from('orders').update({ status: e.target.value }).eq('id', order.id);
+      if(error){ alert('Could not update status: ' + error.message); return; }
+      order.status = e.target.value;
+      if(statusFilter.value !== '__all__' && statusFilter.value !== order.status
+         && !(statusFilter.value === '__active__' && order.status !== 'Cancelled')){
+        renderOrderList();
+      }
+    });
+
+    tr.querySelector('.delete-order-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteOrder(order, customer);
+    });
+
+    tr.addEventListener('click', (e) => {
+      if(e.target.closest('select, button')) return;
+      openOrderDetailModal(order);
+    });
+
+    return tr;
+  }
+
+  function renderOrderList(){
     if(!allOrders.length){ orderList.innerHTML = '<div class="empty">No orders yet.</div>'; return; }
 
     const filterValue = statusFilter.value;
@@ -528,11 +657,25 @@
       return;
     }
 
-    orderList.innerHTML = '';
+    const table = document.createElement('table');
+    table.className = 'order-table';
+    table.innerHTML = `
+      <thead><tr><th>Poster</th><th>Email</th><th>Product</th><th>Status</th><th>Errors</th><th></th></tr></thead>
+      <tbody></tbody>
+    `;
+    const tbody = table.querySelector('tbody');
     for(const order of filtered){
-      orderList.appendChild(await renderOrderCard(order));
+      tbody.appendChild(renderOrderRow(order));
     }
+    orderList.innerHTML = '';
+    orderList.appendChild(table);
   }
+
+  // Recomputes the "taking longer than expected" badges against the current
+  // time even if nothing else has changed — the only kind of monitoring an
+  // on-demand admin page can do without a background job, but enough to
+  // make a stuck order visible the next time anyone has this tab open.
+  setInterval(() => { if(app.style.display !== 'none') renderOrderList(); }, 5 * 60 * 1000);
 
   async function signedUrl(path){
     if(!path) return null;
@@ -564,7 +707,7 @@
     });
   }
 
-  async function deleteOrder(order, customer, card){
+  async function deleteOrder(order, customer){
     const label = `${order.order_no} (${customer.email})`;
     if(!confirm(`Permanently delete order ${label} and every file attached to it? This cannot be undone.`)) return;
 
@@ -592,8 +735,8 @@
       return;
     }
     allOrders = allOrders.filter(o => o.id !== order.id);
-    card.remove();
-    if(!document.querySelector('.order-card')) renderOrderList();
+    orderDetailOverlay.classList.remove('show');
+    renderOrderList();
   }
 
   async function deleteConstellationItem(order, constellation, block){
@@ -683,7 +826,7 @@
       }
     });
 
-    card.querySelector('.delete-order-btn').addEventListener('click', () => deleteOrder(order, customer, card));
+    card.querySelector('.delete-order-btn').addEventListener('click', () => deleteOrder(order, customer));
 
     const custHint = card.querySelector('.order-head .save-hint');
     wireAutosave(card.querySelector('.customer-email'), 'customers', customer.id,
@@ -818,10 +961,20 @@
           contentType: slot.contentType, upsert: true,
         });
         if(upErr){ alert('Upload failed: ' + upErr.message); return; }
+        const patch = { [slot.key]: newPath };
+        if(slot.key === 'line_drawing_path'){
+          // A fresh upload starts a new generation attempt — reset the
+          // staleness clock and clear out whatever error the last attempt
+          // (if any) left behind, so the order list's Errors column reflects
+          // this attempt, not a stale one.
+          patch.line_drawing_uploaded_at = new Date().toISOString();
+          patch.generation_error = null;
+        }
         const { error: dbErr } = await supabase.from('constellations')
-          .update({ [slot.key]: newPath }).eq('id', constellation.id);
+          .update(patch).eq('id', constellation.id);
         if(dbErr){ alert('Saved file but could not record it: ' + dbErr.message); return; }
         savedEl.style.display = 'block';
+        Object.assign(constellation, patch);
 
         if(slot.key === 'line_drawing_path'){
           savedEl.textContent = 'Saved — auto-generating poster…';
