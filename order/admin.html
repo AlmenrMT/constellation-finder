@@ -81,6 +81,22 @@
   .modal-actions .submit-btn{ background:var(--accent); color:var(--accent-ink); font-weight:700; }
   .modal-actions .submit-btn:disabled{ opacity:.5; cursor:default; }
   .modal-error{ color:var(--bad); font-size:13px; margin-top:10px; display:none; }
+
+  .tabs{ display:flex; gap:8px; margin-top:10px; }
+  .tab-btn{ background:var(--panel2); border:1px solid var(--border); color:var(--muted); padding:7px 14px; border-radius:8px; cursor:pointer; font-size:13px; }
+  .tab-btn.active{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); font-weight:700; }
+
+  .faq-admin-item{ background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:12px; }
+  .faq-admin-item label{ display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; margin-bottom:5px; }
+  .faq-admin-item input, .faq-admin-item textarea{
+    width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    padding:9px 10px; border-radius:8px; font-size:14px; font-family:inherit; margin-bottom:12px;
+  }
+  .faq-admin-item textarea{ resize:vertical; min-height:70px; }
+  .faq-row-actions{ display:flex; justify-content:space-between; align-items:center; }
+  .reorder-btns{ display:flex; gap:6px; align-items:center; }
+  .reorder-btns button{ background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:5px 11px; border-radius:6px; cursor:pointer; font-size:14px; }
+  .reorder-btns button:disabled{ opacity:.35; cursor:default; }
 </style>
 </head>
 <body>
@@ -96,20 +112,33 @@
 <div class="wrap" id="app">
   <div class="topbar">
     <div>
-      <h1>Poster orders</h1>
-      <p class="lead">Update order status, and attach the line drawing / viewer file / poster as you produce each one.</p>
+      <h1>Star Portrait Posters admin</h1>
+      <div class="tabs">
+        <button type="button" class="tab-btn active" data-tab="orders">Orders</button>
+        <button type="button" class="tab-btn" data-tab="faq">FAQ</button>
+      </div>
     </div>
-    <div class="topbar-right">
+    <button id="logoutBtn">Sign out</button>
+  </div>
+
+  <div id="ordersTab" class="tab-panel">
+    <p class="lead">Update order status, and attach the line drawing / viewer file / poster as you produce each one.</p>
+    <div class="topbar-right" style="margin-bottom:20px;">
       <select id="statusFilter">
         <option value="__all__">All statuses</option>
         <option value="__active__">Active (hide Cancelled)</option>
       </select>
       <button id="addOrderBtn" class="primary">+ Add order</button>
       <button id="clearAllBtn" class="danger">Clear all test data</button>
-      <button id="logoutBtn">Sign out</button>
     </div>
+    <div id="orderList"></div>
   </div>
-  <div id="orderList"></div>
+
+  <div id="faqTab" class="tab-panel" style="display:none;">
+    <p class="lead">Edit the questions shown on the public FAQ page — changes save automatically and go live immediately.</p>
+    <button type="button" id="addFaqBtn" class="primary" style="margin-bottom:18px;">+ Add question</button>
+    <div id="faqAdminList"></div>
+  </div>
 </div>
 
 <div class="modal-overlay" id="addOrderOverlay">
@@ -350,6 +379,105 @@
       btn.disabled = false;
       btn.textContent = originalLabel;
     }
+  });
+
+  // ---------- tabs ----------
+  const ordersTab = document.getElementById('ordersTab');
+  const faqTab = document.getElementById('faqTab');
+  let faqsLoaded = false;
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === btn));
+      const tab = btn.dataset.tab;
+      ordersTab.style.display = tab === 'orders' ? 'block' : 'none';
+      faqTab.style.display = tab === 'faq' ? 'block' : 'none';
+      if(tab === 'faq' && !faqsLoaded){ faqsLoaded = true; loadFaqs(); }
+    });
+  });
+
+  // ---------- FAQ management (public page: faq.html) ----------
+  const faqAdminList = document.getElementById('faqAdminList');
+  let allFaqs = [];
+
+  async function loadFaqs(){
+    faqAdminList.innerHTML = '<div class="empty">Loading…</div>';
+    const { data, error } = await supabase.from('faqs').select('*')
+      .order('sort_order', { ascending: true }).order('created_at', { ascending: true });
+    if(error){ faqAdminList.innerHTML = '<div class="empty">Could not load FAQ: ' + error.message + '</div>'; return; }
+    allFaqs = data;
+    renderFaqList();
+  }
+
+  function renderFaqList(){
+    if(!allFaqs.length){ faqAdminList.innerHTML = '<div class="empty">No questions yet — add one above.</div>'; return; }
+    faqAdminList.innerHTML = '';
+    allFaqs.forEach((faq, i) => faqAdminList.appendChild(renderFaqItem(faq, i)));
+  }
+
+  function renderFaqItem(faq, index){
+    const el = document.createElement('div');
+    el.className = 'faq-admin-item';
+    el.innerHTML = `
+      <label>Question</label>
+      <input type="text" class="faq-question" value="${escapeAttr(faq.question)}">
+      <label>Answer</label>
+      <textarea class="faq-answer">${escapeAttr(faq.answer)}</textarea>
+      <div class="faq-row-actions">
+        <div class="reorder-btns">
+          <button type="button" class="faq-up" ${index === 0 ? 'disabled' : ''}>↑</button>
+          <button type="button" class="faq-down" ${index === allFaqs.length - 1 ? 'disabled' : ''}>↓</button>
+          <span class="save-hint">Saved ✓</span>
+        </div>
+        <button type="button" class="delete-order-btn faq-delete">Delete</button>
+      </div>
+    `;
+    const hint = el.querySelector('.save-hint');
+
+    wireAutosave(el.querySelector('.faq-question'), 'faqs', faq.id,
+      () => ({ question: el.querySelector('.faq-question').value.trim() }),
+      () => { faq.question = el.querySelector('.faq-question').value.trim(); }, hint);
+    wireAutosave(el.querySelector('.faq-answer'), 'faqs', faq.id,
+      () => ({ answer: el.querySelector('.faq-answer').value.trim() }),
+      () => { faq.answer = el.querySelector('.faq-answer').value.trim(); }, hint);
+
+    el.querySelector('.faq-delete').addEventListener('click', async () => {
+      if(!confirm(`Delete the question "${faq.question || '(untitled)'}"? This cannot be undone.`)) return;
+      const { error } = await supabase.from('faqs').delete().eq('id', faq.id);
+      if(error){ alert('Could not delete: ' + error.message); return; }
+      allFaqs = allFaqs.filter(f => f.id !== faq.id);
+      renderFaqList();
+    });
+
+    el.querySelector('.faq-up').addEventListener('click', () => swapFaqOrder(index, index - 1));
+    el.querySelector('.faq-down').addEventListener('click', () => swapFaqOrder(index, index + 1));
+
+    return el;
+  }
+
+  // Swaps two entries' sort_order (and their position in allFaqs) and saves
+  // both — the public page and this list are both ordered by sort_order, so
+  // this is a plain adjacent-pair swap, not a full renumbering.
+  async function swapFaqOrder(i, j){
+    if(j < 0 || j >= allFaqs.length) return;
+    const a = allFaqs[i], b = allFaqs[j];
+    const aOrder = a.sort_order, bOrder = b.sort_order;
+    const { error } = await supabase.from('faqs').update({ sort_order: bOrder }).eq('id', a.id);
+    if(error){ alert('Could not reorder: ' + error.message); return; }
+    const { error: err2 } = await supabase.from('faqs').update({ sort_order: aOrder }).eq('id', b.id);
+    if(err2){ alert('Could not reorder: ' + err2.message); return; }
+    a.sort_order = bOrder; b.sort_order = aOrder;
+    [allFaqs[i], allFaqs[j]] = [allFaqs[j], allFaqs[i]];
+    renderFaqList();
+  }
+
+  document.getElementById('addFaqBtn').addEventListener('click', async () => {
+    const maxOrder = allFaqs.reduce((max, f) => Math.max(max, f.sort_order), 0);
+    const { data, error } = await supabase.from('faqs')
+      .insert({ question: 'New question', answer: '', sort_order: maxOrder + 10 })
+      .select().single();
+    if(error){ alert('Could not add question: ' + error.message); return; }
+    allFaqs.push(data);
+    renderFaqList();
   });
 
   async function checkSession(){

@@ -1,4 +1,4 @@
-// Shared by index.html and admin.html. Fill these in from your Supabase
+// Shared by index.html, admin.html, and faq.html. Fill these in from your Supabase
 // project's Settings > API page — both values are meant to be public
 // (access is controlled by database policies, not by keeping this secret).
 window.SUPABASE_URL = 'https://ucendejvemlnrsfetrxu.supabase.co';
