@@ -1084,11 +1084,15 @@
     iframe.style.display = 'none';
     iframe.src = FINDER_URL + '?constellation=' + encodeURIComponent(constellationNo) + '&auto=1';
 
+    // 45s, not 30s — waitForMatch's own 20s budget leaves the rest of the
+    // pipeline (PDF build, photo processing, two Supabase uploads, and a
+    // GitHub publish that now also uploads the photo) real room to finish
+    // without a false "taking a while" before it's actually stuck.
     const timeout = setTimeout(() => {
       window.removeEventListener('message', onMessage);
       iframe.remove();
       statusEl.textContent = 'Auto-generate is taking a while — check back, or open in Constellation Finder manually.';
-    }, 30000);
+    }, 45000);
 
     function onMessage(e){
       if(!e.data || e.data.source !== 'constellation-finder-auto') return;

@@ -3150,33 +3150,41 @@
     lastMatchData.photoUrl = photoBase64 ? `${orderContext.constellationNo}-photo.jpg` : null;
 
     const base = orderContext.customerNo + '/' + orderContext.orderNo + '/' + orderContext.constellationNo + '/';
-    const { error: posterErr } = await supabaseOrders.storage.from('posters')
-      .upload(base + 'poster.pdf', pdfBlob, { contentType: 'application/pdf', upsert: true });
+    const jsonBlob = new Blob([JSON.stringify(lastMatchData, null, 2)], { type: 'application/json' });
+
+    // These three don't depend on each other's results, so they run
+    // together rather than one after another — publishing a photo now adds
+    // a real extra GitHub round-trip (see publish-constellation), and
+    // running everything serially was slow enough to trip admin.html's own
+    // 45s wait for the whole auto-generate pipeline.
+    const [posterUp, jsonUp, publishSettled] = await Promise.allSettled([
+      supabaseOrders.storage.from('posters').upload(base + 'poster.pdf', pdfBlob, { contentType: 'application/pdf', upsert: true }),
+      supabaseOrders.storage.from('posters').upload(base + 'constellation.json', jsonBlob, { contentType: 'application/json', upsert: true }),
+      // Also publishes the map JSON (and photo) to the public maps/ folder
+      // (via the publish-constellation Edge Function — see the comment
+      // above the manual "Publish in Viewer" button) so the poster's QR
+      // code — which always points at this stable constellationNo —
+      // actually resolves for the customer. Use lastMatchData's own name
+      // (from the constellation-name field, pre-filled from the order's
+      // title — see loadOrderFromSupabase) — NOT orderContext.constellationNo,
+      // which is the K-number id, not a display name.
+      publishConstellation(orderContext.constellationNo, lastMatchData.name, lastMatchData, photoBase64),
+    ]);
+
+    const posterErr = posterUp.status === 'rejected' ? posterUp.reason : posterUp.value.error;
     if(posterErr){ await recordGenerationError(posterErr.message || String(posterErr)); throw posterErr; }
 
-    const jsonBlob = new Blob([JSON.stringify(lastMatchData, null, 2)], { type: 'application/json' });
-    const { error: jsonErr } = await supabaseOrders.storage.from('posters')
-      .upload(base + 'constellation.json', jsonBlob, { contentType: 'application/json', upsert: true });
+    const jsonErr = jsonUp.status === 'rejected' ? jsonUp.reason : jsonUp.value.error;
     if(jsonErr){ await recordGenerationError(jsonErr.message || String(jsonErr)); throw jsonErr; }
 
-    // Also publish the map JSON to the public maps/ folder (via the
-    // publish-constellation Edge Function — see the comment above the manual
-    // "Publish in Viewer" button) so the poster's QR code — which always
-    // points at this stable constellationNo — actually resolves for the
-    // customer. Kept non-fatal to the order save itself (the poster/JSON are
-    // already safely in Supabase either way), but the failure is returned
-    // instead of only logged, so callers can actually tell the admin their
+    // Kept non-fatal to the order save itself (the poster/JSON are already
+    // safely in Supabase either way), but the failure is returned instead
+    // of only logged, so callers can actually tell the admin their
     // customer's QR code won't work yet.
     let publishError = null;
-    try{
-      // Use lastMatchData's own name (from the constellation-name field,
-      // pre-filled from the order's title — see loadOrderFromSupabase) —
-      // NOT orderContext.constellationNo, which is the K-number id, not a
-      // display name.
-      await publishConstellation(orderContext.constellationNo, lastMatchData.name, lastMatchData, photoBase64);
-    }catch(err){
-      publishError = err.message || String(err);
-      console.error('Auto-publish to viewer failed:', err);
+    if(publishSettled.status === 'rejected'){
+      publishError = publishSettled.reason.message || String(publishSettled.reason);
+      console.error('Auto-publish to viewer failed:', publishSettled.reason);
     }
 
     // A successful generate always clears any previous generation_error —
