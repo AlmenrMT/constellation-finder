@@ -264,12 +264,21 @@
   const orderDetailOverlay = document.getElementById('orderDetailOverlay');
   const orderDetailBody = document.getElementById('orderDetailBody');
 
+  // Tracks which order's data is currently on screen in the modal, so an
+  // auto-generate running in a background iframe (see triggerAutoGenerate)
+  // knows whether to refresh it once done — the iframe writes straight to
+  // the database and never reports the new field values back to this page,
+  // so "refresh" always means re-fetching, not just re-reading local state.
+  let currentModalOrder = null;
+
   async function openOrderDetailModal(order){
+    currentModalOrder = order;
     orderDetailBody.innerHTML = '';
     orderDetailBody.appendChild(await renderOrderCard(order));
     orderDetailOverlay.classList.add('show');
   }
   function closeOrderDetailModal(){
+    currentModalOrder = null;
     orderDetailOverlay.classList.remove('show');
     renderOrderList();
   }
@@ -1005,7 +1014,7 @@
 
         if(slot.key === 'line_drawing_path'){
           savedEl.textContent = 'Saved — auto-generating poster…';
-          triggerAutoGenerate(constellation.constellation_no, savedEl);
+          triggerAutoGenerate(constellation.constellation_no, savedEl, order);
         }
       });
     }
@@ -1032,7 +1041,7 @@
           Object.assign(constellation, { line_drawing_path: result.line_drawing_path, generation_error: null });
           autoLineStatus.textContent = 'Generated — auto-generating poster…';
           autoLineStatus.style.color = 'var(--good)';
-          triggerAutoGenerate(constellation.constellation_no, autoLineStatus);
+          triggerAutoGenerate(constellation.constellation_no, autoLineStatus, order);
         }catch(err){
           autoLineStatus.textContent = 'Could not generate: ' + (err.message || err);
           autoLineStatus.style.color = 'var(--bad)';
@@ -1079,7 +1088,7 @@
   // sketch against the sky and save the poster + viewer JSON, using whatever
   // default settings are currently set there (constellation size, opacity) —
   // no manual "Open in Constellation Finder" step needed for the common case.
-  function triggerAutoGenerate(constellationNo, statusEl){
+  function triggerAutoGenerate(constellationNo, statusEl, order){
     const iframe = document.createElement('iframe');
     iframe.style.display = 'none';
     iframe.src = FINDER_URL + '?constellation=' + encodeURIComponent(constellationNo) + '&auto=1';
@@ -1101,10 +1110,23 @@
       iframe.remove();
       if(e.data.ok){
         statusEl.textContent = 'Poster auto-generated ✓';
-        loadOrders();
       }else{
         statusEl.textContent = 'Auto-generate failed (' + (e.data.error || 'unknown error') + ') — open in Constellation Finder manually.';
       }
+      // The iframe writes straight to the database and never reports the
+      // new field values back here — reload no matter which branch above
+      // ran, since even a reported failure (e.g. "saved, but viewer publish
+      // failed") can still mean the poster/description really did save. If
+      // this order's detail modal is the one still open, refresh it with
+      // the freshly-reloaded object instead of the stale one its closures
+      // were built from, or its file links and description would keep
+      // showing pre-generation state until manually closed and reopened.
+      const wasOpenForThisOrder = currentModalOrder === order;
+      loadOrders().then(() => {
+        if(!wasOpenForThisOrder) return;
+        const fresh = allOrders.find(o => o.order_no === order.order_no);
+        if(fresh) openOrderDetailModal(fresh);
+      });
     }
     window.addEventListener('message', onMessage);
     document.body.appendChild(iframe);
