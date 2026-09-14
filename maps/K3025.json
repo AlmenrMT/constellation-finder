@@ -2,7 +2,7 @@
   "schema": "constellation-map-v1",
   "id": "K3025",
   "name": "Det smukke par",
-  "generatedAt": "2026-09-14T15:31:32.254Z",
+  "generatedAt": "2026-09-14T16:49:20.555Z",
   "howToRender": {
     "summary": "Everything needed to redraw this chart and re-align \"drawing\" with the stars, independent of this app.",
     "starProjection": "Place star (ra,dec) at gnomonic(ra, dec, view.centerRa, view.centerDec) -> {x,y} tangent-plane units, then apply your own pan/zoom/scale to pixels.",
@@ -16,13 +16,13 @@
   },
   "projection": {
     "type": "gnomonic",
-    "tangentRa": 42.8785,
-    "tangentDec": 35.0597,
+    "tangentRa": 326.1614,
+    "tangentDec": 25.645,
     "fit": {
-      "sRe": 1451.3759368360418,
+      "sRe": 924.9638555855898,
       "sIm": 0,
-      "tx": 296.84975513990344,
-      "ty": -268.43440718804754
+      "tx": 283.5007051307756,
+      "ty": -275.3345865078608
     }
   },
   "drawing": {
@@ -31,19 +31,19 @@
     "height": 423
   },
   "view": {
-    "centerRa": 38.95390850888134,
-    "centerDec": 34.702925,
-    "halfWidthDeg": 16.677757611957162,
-    "halfHeightDeg": 15.03992786832219
+    "centerRa": 319.6707385597398,
+    "centerDec": 25.4637875,
+    "halfWidthDeg": 21.52413493349278,
+    "halfHeightDeg": 21.41235330553603
   },
   "stars": [
     {
       "id": 0,
-      "name": "58 And",
-      "constellation": "Andromeda",
-      "ra": 32.1218,
-      "dec": 37.8591,
-      "mag": 4.78,
+      "name": "52 Cyg",
+      "constellation": "Cygnus",
+      "ra": 311.4156,
+      "dec": 30.7197,
+      "mag": 4.22,
       "inputPoint": {
         "x": 487.43037974683546,
         "y": 173.5113924050633,
@@ -52,11 +52,11 @@
     },
     {
       "id": 1,
-      "name": "24 Per",
-      "constellation": "Perseus",
-      "ra": 44.7653,
-      "dec": 35.1831,
-      "mag": 4.94,
+      "name": "16 Peg",
+      "constellation": "Pegasus",
+      "ra": 328.2657,
+      "dec": 25.9251,
+      "mag": 5.09,
       "inputPoint": {
         "x": 260.4784810126582,
         "y": 273.4759493670886,
@@ -65,11 +65,11 @@
     },
     {
       "id": 2,
-      "name": "6 Tri",
-      "constellation": "Triangulum",
-      "ra": 33.0929,
-      "dec": 30.3031,
-      "mag": 4.94,
+      "name": "29 Vul",
+      "constellation": "Vulpecula",
+      "ra": 309.6306,
+      "dec": 21.2012,
+      "mag": 4.81,
       "inputPoint": {
         "x": 533.5329949238578,
         "y": 357.5456852791878,
@@ -78,11 +78,11 @@
     },
     {
       "id": 3,
-      "name": "32 Per",
-      "constellation": "Perseus",
-      "ra": 50.3607,
-      "dec": 43.3297,
-      "mag": 4.96,
+      "name": "1 Lac",
+      "constellation": "Lacerta",
+      "ra": 333.9924,
+      "dec": 37.7487,
+      "mag": 4.14,
       "inputPoint": {
         "x": 150.52162849872772,
         "y": 67.51908396946565,
@@ -91,11 +91,11 @@
     },
     {
       "id": 4,
-      "name": "Del Tri",
-      "constellation": "Triangulum",
-      "ra": 34.2629,
-      "dec": 34.2242,
-      "mag": 4.84,
+      "name": "31 Vul",
+      "constellation": "Vulpecula",
+      "ra": 313.032,
+      "dec": 27.097,
+      "mag": 4.56,
       "inputPoint": {
         "x": 472.5,
         "y": 274.5,
@@ -104,11 +104,11 @@
     },
     {
       "id": 5,
-      "name": "21 Per",
-      "constellation": "Perseus",
-      "ra": 44.322,
-      "dec": 31.9342,
-      "mag": 5.1,
+      "name": "13 Peg",
+      "constellation": "Pegasus",
+      "ra": 327.5362,
+      "dec": 17.2859,
+      "mag": 5.34,
       "inputPoint": {
         "x": 252.46859903381642,
         "y": 376.4782608695652,
@@ -117,11 +117,11 @@
     },
     {
       "id": 6,
-      "name": "10 Tri",
-      "constellation": "Triangulum",
-      "ra": 34.7375,
-      "dec": 28.6427,
-      "mag": 5.29,
+      "name": "Gam-1 Del",
+      "constellation": "Delphinus",
+      "ra": 311.6619,
+      "dec": 16.1241,
+      "mag": 5.15,
       "inputPoint": {
         "x": 525.5,
         "y": 408.5,
@@ -130,11 +130,11 @@
     },
     {
       "id": 7,
-      "name": "14 Tri",
-      "constellation": "Triangulum",
-      "ra": 38.0257,
-      "dec": 36.1473,
-      "mag": 5.15,
+      "name": "35 Vul",
+      "constellation": "Vulpecula",
+      "ra": 321.9169,
+      "dec": 27.6086,
+      "mag": 5.39,
       "inputPoint": {
         "x": 378.5232558139535,
         "y": 242.52325581395348,
@@ -178,25 +178,13 @@
     "label": "Edit to your own location — see obsLat/obsLon in the app"
   },
   "match": {
-    "constellationsUsed": "Andromeda, Perseus, Triangulum",
-    "accuracyResidual": 0.025059440696959458,
-    "intensityResidual": 0.08478704024709549,
-    "combinedScore": 0.0674529608205072,
+    "constellationsUsed": "Cygnus, Pegasus, Vulpecula, Lacerta, Delphinus",
+    "accuracyResidual": 0.023084066429083797,
+    "intensityResidual": 0.15515194292915102,
+    "combinedScore": 0.10066003789365931,
     "intensityWeight": 0.5
   },
   "otherCandidates": [
-    {
-      "constellationsUsed": "Cygnus, Vulpecula, Sagitta",
-      "combinedScore": 0.09877434018643966,
-      "accuracyResidual": 0.011755605910628294,
-      "intensityResidual": 0.17403746855162272
-    },
-    {
-      "constellationsUsed": "Cygnus, Pegasus, Vulpecula, Lacerta, Delphinus",
-      "combinedScore": 0.10066003789365931,
-      "accuracyResidual": 0.023084066429083797,
-      "intensityResidual": 0.15515194292915102
-    },
     {
       "constellationsUsed": "Aquarius, Capricornus",
       "combinedScore": 0.11891787535421136,
@@ -238,8 +226,20 @@
       "combinedScore": 0.132097080628051,
       "accuracyResidual": 0.013944768378852317,
       "intensityResidual": 0.2363046244983974
+    },
+    {
+      "constellationsUsed": "Aquila, Equuleus, Aquarius",
+      "combinedScore": 0.13305808058207452,
+      "accuracyResidual": 0.03614984683708784,
+      "intensityResidual": 0.1938164674899734
+    },
+    {
+      "constellationsUsed": "Draco",
+      "combinedScore": 0.13340494156739757,
+      "accuracyResidual": 0.08551370438195272,
+      "intensityResidual": 0.09578247437088971
     }
   ],
-  "description": "Det smukke par is drawn from 8 real stars — 58 And, 24 Per, 6 Tri, 32 Per, Del Tri, 21 Per, 10 Tri and 14 Tri. Most belong to Triangulum, with the rest borrowed from Perseus, Andromeda. Triangulum is simple and exact, needing no embellishment to be recognizable.\n\nNo constellation rises alone. Triangulum shares this stretch of sky with Perseus, which is resourceful under pressure, solves a difficult problem sideways rather than head-on, and moves fast afterward., and Det smukke par sits right where the two overlap — carrying a little of both, the way a person can take after more than one side of the family.",
+  "description": "Det smukke par is drawn from 8 real stars — 52 Cyg, 16 Peg, 29 Vul, 1 Lac, 31 Vul, 13 Peg, Gam-1 Del and 35 Vul. Most belong to Vulpecula, with the rest borrowed from Pegasus, Cygnus, Lacerta, Delphinus. Vulpecula is modest and a little scrappy, comfortable staying low-key even when something genuinely notable sits quietly within it.\n\nNo constellation rises alone. Vulpecula shares this stretch of sky with Pegasus, which is built to help someone else go further than they could alone, and strains when that ambition overreaches., and Det smukke par sits right where the two overlap — carrying a little of both, the way a person can take after more than one side of the family.",
   "photoUrl": "K3025-photo.jpg"
 }
