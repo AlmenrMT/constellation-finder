@@ -2,7 +2,7 @@
   "schema": "constellation-map-v1",
   "id": "K3025",
   "name": "Det smukke par",
-  "generatedAt": "2026-09-14T16:49:20.555Z",
+  "generatedAt": "2026-09-14T16:49:59.285Z",
   "howToRender": {
     "summary": "Everything needed to redraw this chart and re-align \"drawing\" with the stars, independent of this app.",
     "starProjection": "Place star (ra,dec) at gnomonic(ra, dec, view.centerRa, view.centerDec) -> {x,y} tangent-plane units, then apply your own pan/zoom/scale to pixels.",
