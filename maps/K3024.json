@@ -2,7 +2,7 @@
   "schema": "constellation-map-v1",
   "id": "K3024",
   "name": "Christian Hugger",
-  "generatedAt": "2026-09-10T17:55:50.582Z",
+  "generatedAt": "2026-09-14T15:08:36.482Z",
   "howToRender": {
     "summary": "Everything needed to redraw this chart and re-align \"drawing\" with the stars, independent of this app.",
     "starProjection": "Place star (ra,dec) at gnomonic(ra, dec, view.centerRa, view.centerDec) -> {x,y} tangent-plane units, then apply your own pan/zoom/scale to pixels.",
@@ -16,13 +16,13 @@
   },
   "projection": {
     "type": "gnomonic",
-    "tangentRa": 170.7066,
-    "tangentDec": 43.4827,
+    "tangentRa": 56.7121,
+    "tangentDec": -23.2497,
     "fit": {
-      "sRe": 995.1660814334443,
+      "sRe": 1041.282473219997,
       "sIm": 0,
-      "tx": 296.2963726740277,
-      "ty": -362.1387739702996
+      "tx": 267.2530987839723,
+      "ty": -423.30667491814364
     }
   },
   "drawing": {
@@ -31,19 +31,19 @@
     "height": 800
   },
   "view": {
-    "centerRa": 167.79135940683364,
-    "centerDec": 43.4919625,
-    "halfWidthDeg": 34.778292188171235,
-    "halfHeightDeg": 24.692090965153795
+    "centerRa": 52.124413620444614,
+    "centerDec": -18.7946625,
+    "halfWidthDeg": 28.630114210411303,
+    "halfHeightDeg": 20.041905876593795
   },
   "stars": [
     {
       "id": 0,
-      "name": "Lam UMa",
-      "constellation": "Ursa Major",
-      "ra": 154.2743,
-      "dec": 42.9144,
-      "mag": 3.45,
+      "name": "Tau-1 Eri",
+      "constellation": "Eridanus",
+      "ra": 41.2757,
+      "dec": -18.5726,
+      "mag": 4.47,
       "inputPoint": {
         "x": 525.4472361809045,
         "y": 343.5150753768844,
@@ -52,11 +52,11 @@
     },
     {
       "id": 1,
-      "name": "Psi UMa",
-      "constellation": "Ursa Major",
-      "ra": 167.4159,
-      "dec": 44.4985,
-      "mag": 3,
+      "name": "Tau-5 Eri",
+      "constellation": "Eridanus",
+      "ra": 53.447,
+      "dec": -21.6329,
+      "mag": 4.26,
       "inputPoint": {
         "x": 336.5456852791878,
         "y": 372.46700507614213,
@@ -65,11 +65,11 @@
     },
     {
       "id": 2,
-      "name": "Megrez",
-      "constellation": "Ursa Major",
-      "ra": 183.8563,
-      "dec": 57.0326,
-      "mag": 3.32,
+      "name": "Omi-1 Eri",
+      "constellation": "Eridanus",
+      "ra": 62.9664,
+      "dec": -6.8376,
+      "mag": 4.04,
       "inputPoint": {
         "x": 134.48091603053436,
         "y": 118.52162849872774,
@@ -78,11 +78,11 @@
     },
     {
       "id": 3,
-      "name": "Bet CVn",
-      "constellation": "Canes Venatici",
-      "ra": 188.4362,
-      "dec": 41.3575,
-      "mag": 4.24,
+      "name": "53 Eri",
+      "constellation": "Eridanus",
+      "ra": 69.5451,
+      "dec": -14.304,
+      "mag": 3.86,
       "inputPoint": {
         "x": 66.5,
         "y": 302.5,
@@ -91,11 +91,11 @@
     },
     {
       "id": 4,
-      "name": "23 LMi",
-      "constellation": "Leo Minor",
-      "ra": 154.0602,
-      "dec": 29.3105,
-      "mag": 5.49,
+      "name": "Ome For",
+      "constellation": "Fornax",
+      "ra": 38.4613,
+      "dec": -28.2323,
+      "mag": 4.96,
       "inputPoint": {
         "x": 557.546218487395,
         "y": 598.4789915966387,
@@ -104,11 +104,11 @@
     },
     {
       "id": 5,
-      "name": "36 UMa",
-      "constellation": "Ursa Major",
-      "ra": 157.6569,
-      "dec": 55.9805,
-      "mag": 4.82,
+      "name": "Zet Eri",
+      "constellation": "Eridanus",
+      "ra": 48.9584,
+      "dec": -8.8197,
+      "mag": 4.8,
       "inputPoint": {
         "x": 418.5,
         "y": 137.5,
@@ -117,11 +117,11 @@
     },
     {
       "id": 6,
-      "name": "67 UMa",
-      "constellation": "Ursa Major",
-      "ra": 180.5286,
-      "dec": 43.0456,
-      "mag": 5.22,
+      "name": "Tau-9 Eri",
+      "constellation": "Eridanus",
+      "ra": 59.9812,
+      "dec": -24.0162,
+      "mag": 4.62,
       "inputPoint": {
         "x": 181.5,
         "y": 406.5,
@@ -130,11 +130,11 @@
     },
     {
       "id": 7,
-      "name": "30 LMi",
-      "constellation": "Leo Minor",
-      "ra": 156.4784,
-      "dec": 33.7961,
-      "mag": 4.72,
+      "name": "Gam-2 For",
+      "constellation": "Fornax",
+      "ra": 42.4757,
+      "dec": -27.942,
+      "mag": 5.39,
       "inputPoint": {
         "x": 518.5,
         "y": 502.5,
@@ -178,19 +178,13 @@
     "label": "Edit to your own location — see obsLat/obsLon in the app"
   },
   "match": {
-    "constellationsUsed": "Ursa Major, Canes Venatici, Leo Minor",
-    "accuracyResidual": 0.02278181026021393,
-    "intensityResidual": 0.08600635469983064,
-    "combinedScore": 0.06578498761012926,
+    "constellationsUsed": "Eridanus, Fornax",
+    "accuracyResidual": 0.023192884683432894,
+    "intensityResidual": 0.0877976881041384,
+    "combinedScore": 0.06709172873550209,
     "intensityWeight": 0.5
   },
   "otherCandidates": [
-    {
-      "constellationsUsed": "Eridanus, Fornax",
-      "combinedScore": 0.06709172873550209,
-      "accuracyResidual": 0.023192884683432894,
-      "intensityResidual": 0.0877976881041384
-    },
     {
       "constellationsUsed": "Serpens, Hercules, Corona Borealis",
       "combinedScore": 0.08813943636215057,
@@ -238,6 +232,14 @@
       "combinedScore": 0.1041876310070301,
       "accuracyResidual": 0.02813898989700989,
       "intensityResidual": 0.15209728222004043
+    },
+    {
+      "constellationsUsed": "Draco, Cepheus",
+      "combinedScore": 0.10516167964567408,
+      "accuracyResidual": 0.03474321466218639,
+      "intensityResidual": 0.1408369299669754
     }
-  ]
+  ],
+  "description": "Christian Hugger is drawn from 8 real stars — Tau-1 Eri, Tau-5 Eri, Omi-1 Eri, 53 Eri, Ome For, Zet Eri, Tau-9 Eri and Gam-2 For. Most belong to Eridanus, with the rest borrowed from Fornax. Eridanus is shaped by having once lost control of something important, and taking the long way back since.\n\nEvery constellation has neighbors, and Eridanus is no exception. Just across the boundary line sits Fornax, purely functional, more interested in doing the work than in being recognized for it. — and a little of that has clearly rubbed off: Christian Hugger borrows a star or two from Fornax, as if Eridanus reached across the dark between them and asked to share a light.",
+  "photoUrl": "K3024-photo.jpg"
 }
