@@ -2,7 +2,7 @@
   "schema": "constellation-map-v1",
   "id": "K3026",
   "name": "Sarah and Kristian",
-  "generatedAt": "2026-09-14T16:23:26.477Z",
+  "generatedAt": "2026-09-14T16:53:28.185Z",
   "howToRender": {
     "summary": "Everything needed to redraw this chart and re-align \"drawing\" with the stars, independent of this app.",
     "starProjection": "Place star (ra,dec) at gnomonic(ra, dec, view.centerRa, view.centerDec) -> {x,y} tangent-plane units, then apply your own pan/zoom/scale to pixels.",
@@ -16,13 +16,13 @@
   },
   "projection": {
     "type": "gnomonic",
-    "tangentRa": 295.9289,
-    "tangentDec": 25.7719,
+    "tangentRa": 42.8785,
+    "tangentDec": 35.0597,
     "fit": {
-      "sRe": 1480.1397751811546,
+      "sRe": 1451.3759368360418,
       "sIm": 0,
-      "tx": 380.630506800586,
-      "ty": -249.3711382169829
+      "tx": 296.84975513990344,
+      "ty": -268.43440718804754
     }
   },
   "drawing": {
@@ -31,19 +31,19 @@
     "height": 423
   },
   "view": {
-    "centerRa": 295.91078779967893,
-    "centerDec": 24.795774999999995,
-    "halfWidthDeg": 15.811886121644473,
-    "halfHeightDeg": 12.747850736079863
+    "centerRa": 38.95390850888134,
+    "centerDec": 34.702925,
+    "halfWidthDeg": 16.677757611957162,
+    "halfHeightDeg": 15.03992786832219
   },
   "stars": [
     {
       "id": 0,
-      "name": "2 Cyg",
-      "constellation": "Cygnus",
-      "ra": 291.0316,
-      "dec": 29.6213,
-      "mag": 4.99,
+      "name": "58 And",
+      "constellation": "Andromeda",
+      "ra": 32.1218,
+      "dec": 37.8591,
+      "mag": 4.78,
       "inputPoint": {
         "x": 487.43037974683546,
         "y": 173.5113924050633,
@@ -52,11 +52,11 @@
     },
     {
       "id": 1,
-      "name": "16 Vul",
-      "constellation": "Vulpecula",
-      "ra": 300.5059,
-      "dec": 24.938,
-      "mag": 5.23,
+      "name": "24 Per",
+      "constellation": "Perseus",
+      "ra": 44.7653,
+      "dec": 35.1831,
+      "mag": 4.94,
       "inputPoint": {
         "x": 260.4784810126582,
         "y": 273.4759493670886,
@@ -65,11 +65,11 @@
     },
     {
       "id": 2,
-      "name": "1 Vul",
-      "constellation": "Vulpecula",
-      "ra": 289.0543,
-      "dec": 21.3904,
-      "mag": 4.76,
+      "name": "6 Tri",
+      "constellation": "Triangulum",
+      "ra": 33.0929,
+      "dec": 30.3031,
+      "mag": 4.94,
       "inputPoint": {
         "x": 533.5329949238578,
         "y": 357.5456852791878,
@@ -78,11 +78,11 @@
     },
     {
       "id": 3,
-      "name": "39 Cyg",
-      "constellation": "Cygnus",
-      "ra": 305.9651,
-      "dec": 32.1902,
-      "mag": 4.43,
+      "name": "32 Per",
+      "constellation": "Perseus",
+      "ra": 50.3607,
+      "dec": 43.3297,
+      "mag": 4.96,
       "inputPoint": {
         "x": 150.52162849872772,
         "y": 67.51908396946565,
@@ -91,11 +91,11 @@
     },
     {
       "id": 4,
-      "name": "Alp Vul",
-      "constellation": "Vulpecula",
-      "ra": 292.1764,
-      "dec": 24.6649,
-      "mag": 4.44,
+      "name": "Del Tri",
+      "constellation": "Triangulum",
+      "ra": 34.2629,
+      "dec": 34.2242,
+      "mag": 4.84,
       "inputPoint": {
         "x": 472.5,
         "y": 274.5,
@@ -104,11 +104,11 @@
     },
     {
       "id": 5,
-      "name": "Eta Sge",
-      "constellation": "Sagitta",
-      "ra": 301.2896,
-      "dec": 19.9911,
-      "mag": 5.09,
+      "name": "21 Per",
+      "constellation": "Perseus",
+      "ra": 44.322,
+      "dec": 31.9342,
+      "mag": 5.1,
       "inputPoint": {
         "x": 252.46859903381642,
         "y": 376.4782608695652,
@@ -117,11 +117,11 @@
     },
     {
       "id": 6,
-      "name": "4 Vul",
-      "constellation": "Vulpecula",
-      "ra": 291.3692,
-      "dec": 19.7984,
-      "mag": 5.14,
+      "name": "10 Tri",
+      "constellation": "Triangulum",
+      "ra": 34.7375,
+      "dec": 28.6427,
+      "mag": 5.29,
       "inputPoint": {
         "x": 525.5,
         "y": 408.5,
@@ -130,11 +130,11 @@
     },
     {
       "id": 7,
-      "name": "10 Vul",
-      "constellation": "Vulpecula",
-      "ra": 295.9289,
-      "dec": 25.7719,
-      "mag": 5.5,
+      "name": "14 Tri",
+      "constellation": "Triangulum",
+      "ra": 38.0257,
+      "dec": 36.1473,
+      "mag": 5.15,
       "inputPoint": {
         "x": 378.5232558139535,
         "y": 242.52325581395348,
@@ -178,19 +178,13 @@
     "label": "Edit to your own location — see obsLat/obsLon in the app"
   },
   "match": {
-    "constellationsUsed": "Cygnus, Vulpecula, Sagitta",
-    "accuracyResidual": 0.011755605910628294,
-    "intensityResidual": 0.17403746855162272,
-    "combinedScore": 0.09877434018643966,
+    "constellationsUsed": "Andromeda, Perseus, Triangulum",
+    "accuracyResidual": 0.025059440696959458,
+    "intensityResidual": 0.08478704024709549,
+    "combinedScore": 0.0674529608205072,
     "intensityWeight": 0.5
   },
   "otherCandidates": [
-    {
-      "constellationsUsed": "Cygnus, Pegasus, Vulpecula, Lacerta, Delphinus",
-      "combinedScore": 0.10066003789365931,
-      "accuracyResidual": 0.023084066429083797,
-      "intensityResidual": 0.15515194292915102
-    },
     {
       "constellationsUsed": "Aquarius, Capricornus",
       "combinedScore": 0.11891787535421136,
@@ -238,6 +232,12 @@
       "combinedScore": 0.13305808058207452,
       "accuracyResidual": 0.03614984683708784,
       "intensityResidual": 0.1938164674899734
+    },
+    {
+      "constellationsUsed": "Draco",
+      "combinedScore": 0.13340494156739757,
+      "accuracyResidual": 0.08551370438195272,
+      "intensityResidual": 0.09578247437088971
     }
   ],
   "description": "Sarah and Kristian is drawn from 8 real stars — 2 Cyg, 16 Vul, 1 Vul, 39 Cyg, Alp Vul, Eta Sge, 4 Vul and 10 Vul. Most belong to Vulpecula, with the rest borrowed from Cygnus, Sagitta. Vulpecula is modest and a little scrappy, comfortable staying low-key even when something genuinely notable sits quietly within it.\n\nBorders in the sky are older than any drawn on Earth, and Vulpecula has always kept close company with Cygnus — capable of real reinvention, and makes the change look graceful rather than difficult.. Sarah and Kristian carries proof of that friendship in its own shape: a star on loan, a little of Cygnus's influence woven into Vulpecula's outline.",
