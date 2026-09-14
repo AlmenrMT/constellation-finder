@@ -82,6 +82,9 @@
   .artCard{ flex:0 0 auto; width:150px; }
   .artCard img{ width:150px; height:150px; object-fit:cover; border-radius:8px; background:var(--panel); display:block; }
   .artCard .cap{ font-size:10px; color:var(--muted); margin-top:4px; line-height:1.3; }
+  #infoPhoto{ margin:0 0 18px; }
+  #infoPhoto img{ width:100%; max-width:260px; border-radius:10px; display:block; background:var(--panel); }
+  #infoPhoto .cap{ font-size:11px; color:var(--muted); margin-top:6px; }
 
   /* ---- AR screen ---- */
   #arScreen{ position:fixed; inset:0; display:none; background:#000; }
@@ -232,6 +235,8 @@
     <h1 id="infoTitle" style="font-size:20px; margin:0 0 4px;">—</h1>
     <p id="infoSub" class="hint" style="margin:0 0 16px;">—</p>
 
+    <div id="infoPhoto" style="display:none;"></div>
+
     <div id="skyMapWrap">
       <canvas id="skyMapCanvas" style="width:100%; aspect-ratio:1; background:#000; border-radius:10px; touch-action:none; display:block;"></canvas>
       <div id="skyMapPopup" hidden></div>
@@ -375,6 +380,7 @@
 
   // ---------- state ----------
   let map = null;          // parsed map file
+  let mapPhotoBaseUrl = '../maps/'; // directory map.photoUrl (if any) resolves against
   let drawingImg = null;   // decoded Image of map.drawing
   let gridSourcePts = [];  // 21x21 grid over the drawing image, each with cached ra/dec
   let drawingSprite = null;     // pre-warped offscreen raster of the drawing (see buildDrawingSprite)
@@ -492,8 +498,9 @@
   updateDragAffordance(!cameraActive);
 
   // ---------- map file loading ----------
-  function loadMapObject(obj, sourceLabel){
+  function loadMapObject(obj, sourceLabel, baseUrl){
     map = obj;
+    mapPhotoBaseUrl = baseUrl || '../maps/';
     document.getElementById('loadStatus').textContent = '';
     document.getElementById('summaryTitle').textContent = map.name || summarizeStars(map.stars);
     document.getElementById('summarySub').textContent = `${map.stars.length} stars · ${sourceLabel}`;
@@ -745,6 +752,15 @@
     document.getElementById('infoTitle').textContent = map.name || summarizeStars(map.stars);
     document.getElementById('infoSub').textContent = `${map.stars.length} stars used in the portrait`;
 
+    const photoEl = document.getElementById('infoPhoto');
+    if(map.photoUrl){
+      photoEl.innerHTML = `<img src="${escapeHtml(mapPhotoBaseUrl + map.photoUrl)}" alt="The original photo" loading="lazy" onerror="this.parentElement.style.display='none'"><div class="cap">The photo this portrait was drawn from</div>`;
+      photoEl.style.display = '';
+    }else{
+      photoEl.innerHTML = '';
+      photoEl.style.display = 'none';
+    }
+
     document.getElementById('infoStars').innerHTML = map.stars.map(describeStarHtml).join('');
 
     const cons = [...new Set(map.stars.map(s=>s.constellation))];
@@ -752,7 +768,14 @@
       `This portrait spans part of ${cons.length > 1 ? 'the official constellations' : 'the official constellation'} ${cons.join(', ')}.`;
 
     document.getElementById('infoAstrologyHeading').textContent = `About the constellation ${pickPrimaryConstellation(cons)}`;
-    document.getElementById('infoAstrology').innerHTML = buildConstellationAstrology(cons);
+    // Prefer the persisted, admin-editable description (see
+    // buildConstellationDescription in constellation-finder/index.html) —
+    // it's the same text shown on the poster's own about page. Falls back
+    // to the live client-computed reading for any map published before this
+    // field existed.
+    document.getElementById('infoAstrology').innerHTML = map.description
+      ? map.description.split(/\n{2,}/).filter(p => p.trim()).map(p => `<p>${escapeHtml(p.trim())}</p>`).join('')
+      : buildConstellationAstrology(cons);
     document.getElementById('infoStory').innerHTML = buildConstellationStory(cons);
 
     // Only the primary constellation's artwork — buildConstellationStory
@@ -1242,7 +1265,7 @@
           try{
             const r = await fetch('../maps/'+m.file);
             const obj = await r.json();
-            loadMapObject(obj, m.name);
+            loadMapObject(obj, m.name, '../maps/');
           }catch(err){ document.getElementById('loadStatus').textContent = 'Could not load '+m.name+'.'; }
         });
         el.appendChild(btn);
@@ -2003,7 +2026,7 @@
       const resp = await fetch(mapUrl);
       if(!resp.ok) throw new Error('HTTP '+resp.status);
       const obj = await resp.json();
-      loadMapObject(obj, mapUrl.split('/').pop());
+      loadMapObject(obj, mapUrl.split('/').pop(), mapUrl.slice(0, mapUrl.lastIndexOf('/')+1));
     }catch(err){
       document.getElementById('dropZone').style.display = '';
       document.getElementById('sharedMaps').style.display = '';

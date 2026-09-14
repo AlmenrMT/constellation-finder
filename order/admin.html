@@ -55,6 +55,7 @@
   .delete-order-btn:hover{ border-color:var(--bad); }
 
   .editable{ background:var(--panel2); border:1px solid var(--border); color:var(--text); padding:6px 8px; border-radius:6px; font-size:13px; width:100%; font-family:inherit; }
+  textarea.editable{ resize:vertical; line-height:1.5; }
   .meta-grid .label{ margin-bottom:3px; }
   .customer-edit{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:4px; }
   .customer-edit input.editable{ width:auto; min-width:140px; flex:1; }
@@ -901,6 +902,13 @@
         </div>
       </div>
       <div class="files"></div>
+      <div style="margin-top:16px;">
+        <label style="display:block; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; margin-bottom:5px;">
+          Poster description (shown on page 2 and in the viewer)
+        </label>
+        <textarea class="editable c-description" rows="6" placeholder="Generated automatically the first time this poster is created — edit anytime, changes take effect next time it's published.">${escapeAttr(constellation.description)}</textarea>
+        <span class="save-hint desc-save-hint">Saved ✓</span>
+      </div>
     `;
 
     const hint = block.querySelector('.save-hint');
@@ -920,6 +928,11 @@
     wireAutosave(block.querySelector('.c-price'), 'constellations', constellation.id,
       () => ({ item_price: parseFloat(block.querySelector('.c-price').value) || 0 }),
       () => { constellation.item_price = parseFloat(block.querySelector('.c-price').value) || 0; }, hint);
+
+    const descHint = block.querySelector('.desc-save-hint');
+    wireAutosave(block.querySelector('.c-description'), 'constellations', constellation.id,
+      () => ({ description: block.querySelector('.c-description').value.trim() || null }),
+      () => { constellation.description = block.querySelector('.c-description').value.trim() || null; }, descHint);
 
     block.querySelector('.remove-item-btn').addEventListener('click', () => deleteConstellationItem(order, constellation, block));
 
@@ -941,11 +954,17 @@
       extraLinks += `<div style="margin-top:6px;"><a href="${FINDER_URL}?constellation=${encodeURIComponent(constellation.constellation_no)}" target="_blank" rel="noopener">Open in Constellation Finder →</a></div>`;
     }
 
+    // Auto-generate is offered whenever there's a photo to work from, even
+    // if a line drawing already exists — re-running it (e.g. after a bad
+    // result) just overwrites the current file, same as re-uploading would.
+    const showAutoLineBtn = slot.key === 'line_drawing_path' && constellation.original_path;
+
     el.innerHTML = `
       <div class="label">${slot.label}</div>
       ${url ? `<a href="${url}" target="_blank" rel="noopener">View current file →</a>` : '<span style="color:var(--muted);font-size:12px;">Not uploaded yet</span>'}
       ${extraLinks}
       ${slot.uploadable ? '<div style="margin-top:8px;"><input type="file"></div><div class="saved" style="display:none;">Saved ✓</div>' : ''}
+      ${showAutoLineBtn ? '<div style="margin-top:8px;"><button class="auto-line-btn" style="background:var(--accent);color:var(--accent-ink);font-weight:700;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:12px;">Auto-generate from photo</button></div><div class="auto-line-status" style="font-size:12px;margin-top:6px;"></div>' : ''}
       ${slot.key === 'poster_path' && path ? '<div style="margin-top:8px;"><button class="send-poster-btn" style="background:var(--accent);color:var(--accent-ink);font-weight:700;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-size:12px;">Send to customer</button></div><div class="send-status" style="font-size:12px;margin-top:6px;"></div>' : ''}
     `;
 
@@ -979,6 +998,38 @@
         if(slot.key === 'line_drawing_path'){
           savedEl.textContent = 'Saved — auto-generating poster…';
           triggerAutoGenerate(constellation.constellation_no, savedEl);
+        }
+      });
+    }
+
+    const autoLineBtn = el.querySelector('.auto-line-btn');
+    if(autoLineBtn){
+      autoLineBtn.addEventListener('click', async () => {
+        const autoLineStatus = el.querySelector('.auto-line-status');
+        autoLineBtn.disabled = true;
+        autoLineStatus.textContent = 'Generating line drawing (takes a few seconds)…';
+        autoLineStatus.style.color = 'var(--muted)';
+        try{
+          const { data: sessionData } = await supabase.auth.getSession();
+          const resp = await fetch(window.SUPABASE_URL + '/functions/v1/generate-line-drawing', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + sessionData.session.access_token,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ constellation_no: constellation.constellation_no }),
+          });
+          const result = await resp.json();
+          if(!resp.ok || !result.ok) throw new Error(result.error || ('HTTP ' + resp.status));
+          Object.assign(constellation, { line_drawing_path: result.line_drawing_path, generation_error: null });
+          autoLineStatus.textContent = 'Generated — auto-generating poster…';
+          autoLineStatus.style.color = 'var(--good)';
+          triggerAutoGenerate(constellation.constellation_no, autoLineStatus);
+        }catch(err){
+          autoLineStatus.textContent = 'Could not generate: ' + (err.message || err);
+          autoLineStatus.style.color = 'var(--bad)';
+        }finally{
+          autoLineBtn.disabled = false;
         }
       });
     }

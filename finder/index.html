@@ -2369,9 +2369,9 @@
   // saveToOrder() below for the same call on that path).
   const publishStatus = document.getElementById('publishStatus');
 
-  async function publishConstellation(id, name, mapData){
+  async function publishConstellation(id, name, mapData, photoBase64){
     const { data, error } = await supabaseOrders.functions.invoke('publish-constellation', {
-      body: { constellationId: id, name, mapData },
+      body: { constellationId: id, name, mapData, photoBase64 },
     });
     if(error) throw error;
     if(!data?.ok) throw new Error(data?.error || 'Publish failed');
@@ -2426,6 +2426,7 @@
   const posterStatus = document.getElementById('posterStatus');
   let lastPosterSvg = '';
   let lastPosterLayers = null;
+  let lastMapUrl = '';
 
   let posterPanelOpen = false;
   document.getElementById('posterBtn').addEventListener('click', () => {
@@ -2450,6 +2451,7 @@
     // slug — so it keeps resolving even if the name is edited or duplicated
     // elsewhere, as long as it's been published (see "Publish in Viewer").
     const mapUrl = VIEWER_BASE_URL + '?map=' + encodeURIComponent('../maps/' + (constellationId||'constellation') + '.json');
+    lastMapUrl = mapUrl;
 
     lastPosterLayers = buildPosterSvg(lastBestMatch, lastMstEdges, lastDrawingLayer, title, mapUrl, lastBgColor, zoomFactor, constOpacity);
     lastPosterSvg = lastPosterLayers.full;
@@ -2557,7 +2559,7 @@
     const blob = await resp.blob();
     const file = new File([blob], 'sketch.jpg', { type: blob.type || 'image/jpeg' });
 
-    orderContext = { rowId: row.id, orderNo: order.order_no, customerNo: customer.customer_no, email: customer.email, constellationNo: row.constellation_no };
+    orderContext = { rowId: row.id, orderNo: order.order_no, customerNo: customer.customer_no, email: customer.email, constellationNo: row.constellation_no, originalPath: row.original_path, description: row.description || null };
     orderIdOverride = row.constellation_no;
     document.getElementById('constellationName').value = row.title || '';
     loadFile(file);
@@ -2606,6 +2608,35 @@
     }
   }
 
+  // Downsizes the customer's original photo for the about-page thumbnail
+  // and the copy published to the public viewer — a full camera-resolution
+  // photo is unnecessary at this display size, and would risk exceeding
+  // GitHub's Contents API per-file limit for the published copy.
+  async function resizeImageForPublish(img, maxDim){
+    const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.round(img.naturalWidth*scale), h = Math.round(img.naturalHeight*scale);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+    const resizedImg = await new Promise((resolve, reject) => {
+      const im = new Image();
+      im.onload = () => resolve(im);
+      im.onerror = reject;
+      im.src = URL.createObjectURL(blob);
+    });
+    return { blob, img: resizedImg };
+  }
+
+  function blobToBase64(blob){
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
   // Apparent magnitude is the only brightness figure every star in the
   // catalog has — same fallback description as the Viewer's info page
   // (describeBrightness in constellation-viewer/index.html) for stars
@@ -2617,6 +2648,67 @@
     if(mag < 3.5) return 'moderately bright';
     if(mag < 5) return 'faint, visible to the naked eye in dark skies';
     return 'very faint, near the naked-eye limit';
+  }
+
+  // A small stable hash so the same constellation pairing always picks the
+  // same story variant (repeatable, not random on every regenerate) while
+  // different pairings/titles spread across the available variants.
+  function stableTextHash(str){
+    let h = 0;
+    for(let i=0; i<str.length; i++) h = (h*31 + str.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
+
+  // Builds the free-text "description" for a poster's about page: first a
+  // factual paragraph explaining which real stars/constellations this
+  // portrait is actually drawn from, then a short creative story about how
+  // the neighboring constellations (the other constellations this
+  // portrait's own stars happen to belong to) influence it. Runs once, the
+  // first time a poster is generated (see saveToOrder()) — the result is
+  // persisted to constellations.description and never regenerated over an
+  // existing value, so an admin's edit in admin.html always sticks.
+  function buildConstellationDescription(matchData, title){
+    const stars = matchData.stars;
+    const counts = {};
+    for(const s of stars) counts[s.constellation] = (counts[s.constellation]||0) + 1;
+    const cons = Object.keys(counts);
+    const ranked = [...cons].sort((a,b) => counts[b]-counts[a]);
+    const primary = ranked[0];
+    const secondary = ranked.slice(1);
+    const starNames = stars.map(s => s.name);
+    const starList = starNames.length > 1
+      ? starNames.slice(0,-1).join(', ') + ' and ' + starNames[starNames.length-1]
+      : starNames[0];
+
+    // ---- part 1: the facts ----
+    let facts = `${title} is drawn from ${stars.length} real star${stars.length===1?'':'s'} — ${starList}. `;
+    facts += cons.length === 1
+      ? `Every one of them officially belongs to the constellation ${primary}.`
+      : `Most belong to ${primary}, with the rest borrowed from ${secondary.join(', ')}.`;
+    const astroText = window.CONSTELLATION_ASTROLOGY && window.CONSTELLATION_ASTROLOGY[primary];
+    if(astroText) facts += ` ${primary} is ${astroText}`;
+
+    // ---- part 2: a short story about the neighbors' influence ----
+    let story;
+    if(secondary.length){
+      const neighbor = secondary[0];
+      const neighborTraits = window.CONSTELLATION_ASTROLOGY && window.CONSTELLATION_ASTROLOGY[neighbor];
+      const variants = [
+        (p,n,nt) => `Every constellation has neighbors, and ${p} is no exception. Just across the boundary line sits ${n}${nt ? `, ${nt}` : ''} — and a little of that has clearly rubbed off: ${title} borrows a star or two from ${n}, as if ${p} reached across the dark between them and asked to share a light.`,
+        (p,n,nt) => `No constellation rises alone. ${p} shares this stretch of sky with ${n}${nt ? `, which is ${nt}` : ''}, and ${title} sits right where the two overlap — carrying a little of both, the way a person can take after more than one side of the family.`,
+        (p,n,nt) => `${p} and ${n} have been neighbors for as long as anyone has been naming stars.${nt ? ` ${n} is ${nt}, and` : ''} ${title} is what happens when that neighborliness shows through: a shape mostly ${p}, quietly finished off by ${n}.`,
+        (p,n,nt) => `Borders in the sky are older than any drawn on Earth, and ${p} has always kept close company with ${n}${nt ? ` — ${nt}` : ''}. ${title} carries proof of that friendship in its own shape: a star on loan, a little of ${n}'s influence woven into ${p}'s outline.`,
+      ];
+      const pick = variants[stableTextHash(title + primary + neighbor) % variants.length];
+      story = pick(primary, neighbor, neighborTraits);
+    }else{
+      const conLore = window.CONSTELLATION_LORE && window.CONSTELLATION_LORE[primary];
+      story = conLore
+        ? `${title} keeps entirely to ${primary}'s own company tonight, with no borrowed stars and no outside influence — just one constellation's shape, traced clean. ${conLore}`
+        : `${title} keeps entirely to ${primary}'s own company tonight — no borrowed stars, no outside influence, just one constellation's shape traced clean.`;
+    }
+
+    return facts + '\n\n' + story;
   }
 
   // Builds a second poster page carrying the same text and images as the
@@ -2660,7 +2752,7 @@
   // fixed page, not a scroll), then draws only the winning layout once.
   // `images` is loaded once by the caller and passed in rather than
   // refetched on every attempt.
-  function layoutAboutPage(matchData, title, scale, images){
+  function layoutAboutPage(matchData, title, scale, images, description, photoImg){
     const W = 1000, MARGIN = 80, CONTENT_W = W - MARGIN*2;
     const TEXT_TITLE = '#f3f6ff', TEXT_MUTED = '#8f9bc2', TEXT_LABEL = '#b9c4e8', TEXT_BODY = '#d7deef';
     const s = scale;
@@ -2765,17 +2857,32 @@
 
     const blocks = [{ type:'title', text: `About the constellation ${title}`, font: FONT_HEAD, h: TITLE_H }];
 
-    // Which official constellation(s) this spans, then that constellation's
-    // astrological character read, then its myth and classical artwork
-    // together, then the guiding star, and only then the star-by-star
-    // breakdown — no heading here, straight under the page's own title.
+    // The photo this whole portrait was traced from — right under the
+    // title, before any of the sky content, so it reads as "here's what we
+    // started from" rather than an afterthought at the bottom of the page.
+    if(photoImg){
+      const capLineH = Math.round(15*s);
+      const photoW = Math.round(220*s);
+      const captionLines = wrap('The photo this portrait was drawn from', FONT_LABEL, photoW);
+      const cardH = photoW * photoImg.naturalHeight/photoImg.naturalWidth;
+      blocks.push({ type:'imageRow', images: [{ img: photoImg, captionLines }], cardW: photoW, cardH, gap: 0, capLineH, font: FONT_LABEL, color: TEXT_LABEL, h: cardH + Math.round(10*s) + captionLines.length*capLineH });
+    }
+
+    // Which official constellation(s) this spans, then the admin-editable
+    // description (see buildConstellationDescription) — a factual
+    // explanation of the real stars/constellations involved, followed by a
+    // short creative story about the neighboring constellations' influence
+    // — then its myth and classical artwork, then the guiding star, and
+    // only then the star-by-star breakdown.
     blocks.push(paragraph(spansLine, FONT_LABEL, TEXT_LABEL, LABEL_LINE_H));
-    if(astroText){
-      // No sub-heading here — these lines are about {title} (the page's own
-      // subject, already named in the page title above), not about
-      // {primary} (the official constellation, named in the spans line
-      // above and in the myth heading below), so a heading naming the
-      // official constellation would mismatch the very sentences under it.
+    if(description){
+      for(const para of description.split(/\n{2,}/)){
+        if(para.trim()) blocks.push(paragraph(para.trim(), FONT_BODY, TEXT_BODY, LINE_H));
+      }
+    }else if(astroText){
+      // Fallback only — saveToOrder() always generates+persists a
+      // description before this ever runs, so this branch should only ever
+      // fire for a poster previewed before being saved to an order.
       blocks.push(paragraph(`${title} is ${astroText}`, FONT_BODY, TEXT_BODY, LINE_H));
       if(secondary.length === 1){
         blocks.push(paragraph(`${title} also carries a single star from ${secondary[0]} — a quieter, secondary influence.`, FONT_BODY, TEXT_BODY, LINE_H));
@@ -2887,7 +2994,7 @@
   // poster's own first page — not a scrollable/variable-length document —
   // so a content-heavy order shrinks its text (down to a legibility floor)
   // rather than growing the page.
-  async function buildAboutPageCanvas(matchData, title){
+  async function buildAboutPageCanvas(matchData, title, description, photoImg){
     const PAGE_H = 1400;
     // Only the primary constellation's artwork — the myth text below (see
     // layoutAboutPage's conLore) is only ever shown for the primary
@@ -2910,10 +3017,10 @@
     // size, so re-measuring at each attempt (rather than scaling the first
     // attempt's pixel output) is what keeps every attempt's text sharp.
     const MIN_SCALE = 0.62;
-    let scale = 1, layout = layoutAboutPage(matchData, title, scale, images);
+    let scale = 1, layout = layoutAboutPage(matchData, title, scale, images, description, photoImg);
     for(let i = 0; i < 4 && layout.contentHeight > PAGE_H && scale > MIN_SCALE; i++){
       scale = Math.max(MIN_SCALE, scale * (PAGE_H / layout.contentHeight) * 0.97);
-      layout = layoutAboutPage(matchData, title, scale, images);
+      layout = layoutAboutPage(matchData, title, scale, images, description, photoImg);
     }
 
     return drawAboutPage(layout, PAGE_H);
@@ -2957,16 +3064,57 @@
     const pdf = new jsPDF({ unit: 'px', format: [1000, 1400] });
     pdf.addImage(c, 'PNG', 0, 0, 1000, 1400);
 
+    // A real tappable link over the QR code, not just the scannable image
+    // itself — box coordinates must match the QR's own drawing math in
+    // buildPosterSvg() (W=1000, H=1400, qrSize=92, pad=8 are all fixed
+    // there, so duplicating the arithmetic here is safe).
+    if(lastMapUrl){
+      const qrSize = 92, qrPad = 8;
+      const qrBoxX = 1000 - qrSize - qrPad*2 - 28, qrBoxY = 1400 - qrSize - qrPad*2 - 28;
+      pdf.link(qrBoxX, qrBoxY - 16, qrSize + qrPad*2, qrSize + qrPad*2 + 16, { url: lastMapUrl });
+    }
+
+    // The description is only ever auto-written once — if it's already set
+    // (a previous generation wrote it, or an admin has since edited it in
+    // admin.html), it's left completely untouched so regenerating the
+    // poster (a new line drawing, a retried match, etc.) never overwrites a
+    // human's edit.
+    const description = orderContext.description || buildConstellationDescription(lastMatchData, lastMatchData.name);
+    orderContext.description = description;
+
+    // The original photo, downsized for both the about-page thumbnail and
+    // the copy published to the public viewer.
+    let photoImg = null, photoBase64 = null;
+    if(orderContext.originalPath){
+      try{
+        const { data: signedPhoto } = await supabaseOrders.storage.from('posters').createSignedUrl(orderContext.originalPath, 600);
+        const rawImg = signedPhoto ? await loadImageBlob(signedPhoto.signedUrl) : null;
+        if(rawImg){
+          const resized = await resizeImageForPublish(rawImg, 900);
+          photoImg = resized.img;
+          photoBase64 = await blobToBase64(resized.blob);
+        }
+      }catch(err){
+        console.error('Could not load the original photo for the about page:', err);
+      }
+    }
+
     // JPEG, not PNG — this page embeds a real photo/illustration, which PNG
     // (lossless, built for flat color) encodes far larger than a photo-aware
     // codec does; at this quality the size difference is roughly 3x, which
     // matters because the emailed copy is base64-encoded inside a Supabase
     // Edge Function with its own memory ceiling (see send-poster-email).
-    const aboutCanvas = await buildAboutPageCanvas(lastMatchData, lastMatchData.name);
+    const aboutCanvas = await buildAboutPageCanvas(lastMatchData, lastMatchData.name, description, photoImg);
     pdf.addPage([aboutCanvas.width, aboutCanvas.height], 'p');
     pdf.addImage(aboutCanvas.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, aboutCanvas.width, aboutCanvas.height);
 
     const pdfBlob = pdf.output('blob');
+
+    // Set on lastMatchData before either JSON write below — the private
+    // Supabase backup copy and the copy published to the public maps/
+    // folder should never disagree with each other.
+    lastMatchData.description = description;
+    lastMatchData.photoUrl = photoBase64 ? `${orderContext.constellationNo}-photo.jpg` : null;
 
     const base = orderContext.customerNo + '/' + orderContext.orderNo + '/' + orderContext.constellationNo + '/';
     const { error: posterErr } = await supabaseOrders.storage.from('posters')
@@ -2992,7 +3140,7 @@
       // pre-filled from the order's title — see loadOrderFromSupabase) —
       // NOT orderContext.constellationNo, which is the K-number id, not a
       // display name.
-      await publishConstellation(orderContext.constellationNo, lastMatchData.name, lastMatchData);
+      await publishConstellation(orderContext.constellationNo, lastMatchData.name, lastMatchData, photoBase64);
     }catch(err){
       publishError = err.message || String(err);
       console.error('Auto-publish to viewer failed:', err);
@@ -3005,6 +3153,7 @@
       .update({
         poster_path: base + 'poster.pdf',
         viewer_json_path: base + 'constellation.json',
+        description,
         generation_error: publishError,
       })
       .eq('id', orderContext.rowId);
