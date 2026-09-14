@@ -754,7 +754,7 @@
 
     const photoEl = document.getElementById('infoPhoto');
     if(map.photoUrl){
-      photoEl.innerHTML = `<img src="${escapeHtml(mapPhotoBaseUrl + map.photoUrl)}" alt="The original photo" loading="lazy" onerror="this.parentElement.style.display='none'"><div class="cap">The photo this portrait was drawn from</div>`;
+      photoEl.innerHTML = `<img src="${escapeHtml(mapPhotoBaseUrl + map.photoUrl)}" alt="The original photo" loading="lazy" onerror="this.parentElement.style.display='none'">`;
       photoEl.style.display = '';
     }else{
       photoEl.innerHTML = '';

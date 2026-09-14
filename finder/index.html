@@ -2752,7 +2752,7 @@
   // fixed page, not a scroll), then draws only the winning layout once.
   // `images` is loaded once by the caller and passed in rather than
   // refetched on every attempt.
-  function layoutAboutPage(matchData, title, scale, images, description, photoImg){
+  function layoutAboutPage(matchData, title, scale, images, description, photoImg, constellationThumb){
     const W = 1000, MARGIN = 80, CONTENT_W = W - MARGIN*2;
     const TEXT_TITLE = '#f3f6ff', TEXT_MUTED = '#8f9bc2', TEXT_LABEL = '#b9c4e8', TEXT_BODY = '#d7deef';
     const s = scale;
@@ -2857,40 +2857,49 @@
 
     const blocks = [{ type:'title', text: `About the constellation ${title}`, font: FONT_HEAD, h: TITLE_H }];
 
-    // The photo this whole portrait was traced from — right under the
-    // title, before any of the sky content, so it reads as "here's what we
-    // started from" rather than an afterthought at the bottom of the page.
-    if(photoImg){
-      const capLineH = Math.round(15*s);
-      const photoW = Math.round(220*s);
-      const captionLines = wrap('The photo this portrait was drawn from', FONT_LABEL, photoW);
-      const cardH = photoW * photoImg.naturalHeight/photoImg.naturalWidth;
-      blocks.push({ type:'imageRow', images: [{ img: photoImg, captionLines }], cardW: photoW, cardH, gap: 0, capLineH, font: FONT_LABEL, color: TEXT_LABEL, h: cardH + Math.round(10*s) + captionLines.length*capLineH });
+    // Which official constellation(s) this spans, straight under the title.
+    blocks.push(paragraph(spansLine, FONT_LABEL, TEXT_LABEL, LABEL_LINE_H));
+
+    // Three columns: the photo this was traced from (left), the
+    // description (middle — see buildConstellationDescription: a factual
+    // explanation of the real stars/constellations involved, then a short
+    // creative story about the neighboring constellations' influence), and
+    // a small render of the finished star pattern itself, cropped from the
+    // poster's own page 1 (right) — see one at a glance, without a caption
+    // repeating what's already obvious from the layout.
+    const imgW = im => im.naturalWidth || im.width;
+    const imgH = im => im.naturalHeight || im.height;
+    const middleText = description || (astroText ? [
+      `${title} is ${astroText}`,
+      secondary.length === 1 ? `${title} also carries a single star from ${secondary[0]} — a quieter, secondary influence.`
+        : secondary.length > 1 ? `${title} also draws threads from ${secondary.join(', ')} — more than one influence at work.` : null,
+      `${title} is ${character}, and ${brightness}.`,
+    ].filter(Boolean).join(' ') : '');
+    // Fallback middleText only fires if description is somehow still empty
+    // — saveToOrder() always generates+persists one before this ever runs,
+    // so in practice this only matters for a poster previewed before being
+    // saved to an order.
+    if(middleText || photoImg || constellationThumb){
+      const colGap = Math.round(16*s);
+      const sideColW = Math.round(150*s);
+      const midColW = Math.max(Math.round(160*s), CONTENT_W - sideColW*2 - colGap*2);
+      const middleParas = middleText
+        ? middleText.split(/\n{2,}/).filter(p => p.trim()).map(p => ({
+            lines: wrap(p.trim(), FONT_BODY, midColW), font: FONT_BODY, color: TEXT_BODY, lineH: LINE_H, gap: PARA_GAP,
+          }))
+        : [];
+      const midH = middleParas.reduce((sum,p) => sum + p.lines.length*p.lineH + p.gap, 0);
+      const leftH = photoImg ? sideColW * imgH(photoImg)/imgW(photoImg) : 0;
+      const rightH = constellationThumb ? sideColW * imgH(constellationThumb)/imgW(constellationThumb) : 0;
+      blocks.push({
+        type: 'threeCol',
+        left: photoImg ? { img: photoImg, w: sideColW, h: leftH } : null,
+        right: constellationThumb ? { img: constellationThumb, w: sideColW, h: rightH } : null,
+        middleParas, sideColW, midColW, colGap,
+        h: Math.max(leftH, rightH, midH),
+      });
     }
 
-    // Which official constellation(s) this spans, then the admin-editable
-    // description (see buildConstellationDescription) — a factual
-    // explanation of the real stars/constellations involved, followed by a
-    // short creative story about the neighboring constellations' influence
-    // — then its myth and classical artwork, then the guiding star, and
-    // only then the star-by-star breakdown.
-    blocks.push(paragraph(spansLine, FONT_LABEL, TEXT_LABEL, LABEL_LINE_H));
-    if(description){
-      for(const para of description.split(/\n{2,}/)){
-        if(para.trim()) blocks.push(paragraph(para.trim(), FONT_BODY, TEXT_BODY, LINE_H));
-      }
-    }else if(astroText){
-      // Fallback only — saveToOrder() always generates+persists a
-      // description before this ever runs, so this branch should only ever
-      // fire for a poster previewed before being saved to an order.
-      blocks.push(paragraph(`${title} is ${astroText}`, FONT_BODY, TEXT_BODY, LINE_H));
-      if(secondary.length === 1){
-        blocks.push(paragraph(`${title} also carries a single star from ${secondary[0]} — a quieter, secondary influence.`, FONT_BODY, TEXT_BODY, LINE_H));
-      } else if(secondary.length > 1){
-        blocks.push(paragraph(`${title} also draws threads from ${secondary.join(', ')} — more than one influence at work.`, FONT_BODY, TEXT_BODY, LINE_H));
-      }
-      blocks.push(paragraph(`${title} is ${character}, and ${brightness}.`, FONT_BODY, TEXT_BODY, LINE_H));
-    }
     if(conLore) blocks.push(paragraph(conLore, FONT_BODY, TEXT_BODY, LINE_H));
     if(images.length){
       const cols = Math.min(images.length, 3);
@@ -2978,6 +2987,19 @@
           captionLines.forEach((line,i) => ctx.fillText(line, x, y + b.cardH + b.capLineH*0.9 + i*b.capLineH));
           x += b.cardW + b.gap;
         }
+      } else if(b.type === 'threeCol'){
+        if(b.left) ctx.drawImage(b.left.img, MARGIN, y, b.left.w, b.left.h);
+        let ty = y;
+        const midX = MARGIN + b.sideColW + b.colGap;
+        for(const para of b.middleParas){
+          ctx.font = para.font; ctx.fillStyle = para.color;
+          para.lines.forEach((line,i) => ctx.fillText(line, midX, ty + para.lineH*0.7 + i*para.lineH));
+          ty += para.lines.length*para.lineH + para.gap;
+        }
+        if(b.right){
+          const rightX = MARGIN + b.sideColW + b.colGap + b.midColW + b.colGap;
+          ctx.drawImage(b.right.img, rightX, y, b.right.w, b.right.h);
+        }
       }
       y += b.h + BLOCK_GAP;
     }
@@ -2994,7 +3016,7 @@
   // poster's own first page — not a scrollable/variable-length document —
   // so a content-heavy order shrinks its text (down to a legibility floor)
   // rather than growing the page.
-  async function buildAboutPageCanvas(matchData, title, description, photoImg){
+  async function buildAboutPageCanvas(matchData, title, description, photoImg, constellationThumb){
     const PAGE_H = 1400;
     // Only the primary constellation's artwork — the myth text below (see
     // layoutAboutPage's conLore) is only ever shown for the primary
@@ -3017,10 +3039,10 @@
     // size, so re-measuring at each attempt (rather than scaling the first
     // attempt's pixel output) is what keeps every attempt's text sharp.
     const MIN_SCALE = 0.62;
-    let scale = 1, layout = layoutAboutPage(matchData, title, scale, images, description, photoImg);
+    let scale = 1, layout = layoutAboutPage(matchData, title, scale, images, description, photoImg, constellationThumb);
     for(let i = 0; i < 4 && layout.contentHeight > PAGE_H && scale > MIN_SCALE; i++){
       scale = Math.max(MIN_SCALE, scale * (PAGE_H / layout.contentHeight) * 0.97);
-      layout = layoutAboutPage(matchData, title, scale, images, description, photoImg);
+      layout = layoutAboutPage(matchData, title, scale, images, description, photoImg, constellationThumb);
     }
 
     return drawAboutPage(layout, PAGE_H);
@@ -3059,6 +3081,17 @@
       cx.globalAlpha = 1;
     }
     cx.drawImage(afterImg, 0, 0, 1000, 1400);
+
+    // A small "just the pattern" render for the about page's third column —
+    // cropped straight from the page-1 canvas above rather than re-rendered,
+    // so it's guaranteed to match exactly. titleH/skylineH must match
+    // buildPosterSvg()'s own constants (150/210) — everything between them
+    // is sky, stars, and the drawing overlay, with no title text or skyline
+    // art in it.
+    const titleH = 150, skylineH = 210;
+    const constellationThumb = document.createElement('canvas');
+    constellationThumb.width = 1000; constellationThumb.height = 1400 - titleH - skylineH;
+    constellationThumb.getContext('2d').drawImage(c, 0, titleH, 1000, constellationThumb.height, 0, 0, 1000, constellationThumb.height);
 
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ unit: 'px', format: [1000, 1400] });
@@ -3104,7 +3137,7 @@
     // codec does; at this quality the size difference is roughly 3x, which
     // matters because the emailed copy is base64-encoded inside a Supabase
     // Edge Function with its own memory ceiling (see send-poster-email).
-    const aboutCanvas = await buildAboutPageCanvas(lastMatchData, lastMatchData.name, description, photoImg);
+    const aboutCanvas = await buildAboutPageCanvas(lastMatchData, lastMatchData.name, description, photoImg, constellationThumb);
     pdf.addPage([aboutCanvas.width, aboutCanvas.height], 'p');
     pdf.addImage(aboutCanvas.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, aboutCanvas.width, aboutCanvas.height);
 

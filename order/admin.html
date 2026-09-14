@@ -232,6 +232,7 @@
   const supabase = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
   const STATUSES = ['New','Awaiting Payment','Paid','In Production','Shipped','Delivered','Cancelled'];
   const FINDER_URL = 'https://almenrmt.github.io/constellation-finder/finder/';
+  const VIEWER_URL = 'https://almenrmt.github.io/constellation-finder/viewer/';
   const FILE_SLOTS = [
     { key: 'original_path', label: 'Original photo', uploadable: false },
     { key: 'line_drawing_path', label: 'Line drawing', uploadable: true, contentType: 'image/png' },
@@ -952,6 +953,13 @@
     let extraLinks = '';
     if(slot.key === 'line_drawing_path' && path){
       extraLinks += `<div style="margin-top:6px;"><a href="${FINDER_URL}?constellation=${encodeURIComponent(constellation.constellation_no)}" target="_blank" rel="noopener">Open in Constellation Finder →</a></div>`;
+    }
+    if(slot.key === 'viewer_json_path' && url){
+      // The signed URL works here too — the Viewer just fetches whatever
+      // ?map= points at, so this renders the real interactive constellation
+      // (sky map, star details, description) straight from this private
+      // file, no publishing required first.
+      extraLinks += `<div style="margin-top:6px;"><a href="${VIEWER_URL}?map=${encodeURIComponent(url)}" target="_blank" rel="noopener">Preview in Viewer →</a></div>`;
     }
 
     // Auto-generate is offered whenever there's a photo to work from, even
