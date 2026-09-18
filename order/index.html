@@ -80,18 +80,16 @@
   .field{ margin-bottom:18px; }
   .field label{ display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
   .field input[type=text], .field input[type=email], .field select{
-    width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    width:100%; background:#f4f4f2; border:1px solid #d8d8d4; color:#151822;
     padding:11px 12px; border-radius:8px; font-size:14px;
   }
+  .field input[type=text]::placeholder, .field input[type=email]::placeholder{ color:#8a8f99; }
   /* The poster title is the first, most personal thing someone fills in for
-     an item — sized and lit to stand out from the rest of the (same dark
-     shade as the box it sits in) form fields, not just another input. */
+     an item — kept larger and bolder than the rest of the (now same light
+     color) form fields, so it still reads as the primary one. */
   .field label.f-title-label{ font-size:15px; color:var(--text); font-weight:600; margin-bottom:8px; }
-  .field input.f-title{
-    background:#f4f4f2; color:#151822; border:1px solid #d8d8d4;
-    padding:16px 14px; font-size:20px; font-weight:600; border-radius:10px;
-  }
-  .field input.f-title::placeholder{ color:#8a8f99; font-weight:400; }
+  .field input.f-title{ padding:16px 14px; font-size:20px; font-weight:600; border-radius:10px; }
+  .field input.f-title::placeholder{ font-weight:400; }
   /* The native file input's own "Choose File"/"No file chosen" text is
      rendered by the browser in the OS/browser locale and can't be
      overridden directly — so the real input is made invisible but still
@@ -194,11 +192,6 @@
               <div id="itemsContainer"></div>
 
               <button type="button" class="add-item" id="addItemBtn">+ Add another constellation</button>
-
-              <div class="field">
-                <label for="email">Your email address</label>
-                <input type="email" id="email" placeholder="you@example.com" required>
-              </div>
             </div>
 
             <div class="order-side">
@@ -211,6 +204,11 @@
                   <span>Total</span><span id="summaryTotal">—</span>
                 </div>
                 <div class="summary-note" id="summaryNote"></div>
+              </div>
+
+              <div class="field">
+                <label for="email">Your email address</label>
+                <input type="email" id="email" placeholder="you@example.com" required>
               </div>
 
               <div id="addressFields">
