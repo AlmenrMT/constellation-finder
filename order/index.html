@@ -25,8 +25,10 @@
 
   .example-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin:0 0 32px; }
   @media (max-width:700px){ .example-row{ grid-template-columns:1fr; } }
+  .example-item{ text-align:center; }
   .example-card{ aspect-ratio:4/3; background:#000; border-radius:12px; overflow:hidden; border:1px solid var(--border); }
   .example-card img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .example-cap{ font-size:18px; font-weight:600; color:var(--text); margin:12px 0 0; }
 
   .poster-frame{ background:#000; border-radius:14px; padding:10px; box-shadow:0 20px 60px -20px rgba(0,0,0,.6); border:1px solid var(--border); }
   .poster-frame img{ display:block; width:100%; border-radius:6px; }
@@ -81,6 +83,15 @@
     width:100%; background:var(--panel2); border:1px solid var(--border); color:var(--text);
     padding:11px 12px; border-radius:8px; font-size:14px;
   }
+  /* The poster title is the first, most personal thing someone fills in for
+     an item — sized and lit to stand out from the rest of the (same dark
+     shade as the box it sits in) form fields, not just another input. */
+  .field label.f-title-label{ font-size:15px; color:var(--text); font-weight:600; margin-bottom:8px; }
+  .field input.f-title{
+    background:#f4f4f2; color:#151822; border:1px solid #d8d8d4;
+    padding:16px 14px; font-size:20px; font-weight:600; border-radius:10px;
+  }
+  .field input.f-title::placeholder{ color:#8a8f99; font-weight:400; }
   /* The native file input's own "Choose File"/"No file chosen" text is
      rendered by the browser in the OS/browser locale and can't be
      overridden directly — so the real input is made invisible but still
@@ -144,9 +155,18 @@
     <h1>Dedicate a real and unique <span>constellation</span> to a loved one</h1>
 
     <div class="example-row">
-      <div class="example-card"><img src="assets/example-victoria.jpg" alt="A woman's profile, traced as a line portrait and connected to real stars near Eridanus and Orion"></div>
-      <div class="example-card"><img src="assets/example-couple.jpg" alt="A couple's portrait, traced as a line portrait and connected to real stars near Cancer and Gemini"></div>
-      <div class="example-card"><img src="assets/example-dog.jpg" alt="A dog's portrait, traced as a line portrait and connected to real stars near Ursa Major and Ursa Minor"></div>
+      <div class="example-item">
+        <div class="example-card"><img src="assets/example-victoria.jpg" alt="A woman's profile, traced as a line portrait and connected to real stars near Eridanus and Orion"></div>
+        <p class="example-cap">A gift for a friend</p>
+      </div>
+      <div class="example-item">
+        <div class="example-card"><img src="assets/example-couple.jpg" alt="A couple's portrait, traced as a line portrait and connected to real stars near Cancer and Gemini"></div>
+        <p class="example-cap">A celebration of love</p>
+      </div>
+      <div class="example-item">
+        <div class="example-card"><img src="assets/example-dog.jpg" alt="A dog's portrait, traced as a line portrait and connected to real stars near Ursa Major and Ursa Minor"></div>
+        <p class="example-cap">A commemoration of a loss</p>
+      </div>
     </div>
 
     <p class="lead">
@@ -179,6 +199,19 @@
                 <label for="email">Your email address</label>
                 <input type="email" id="email" placeholder="you@example.com" required>
               </div>
+            </div>
+
+            <div class="order-side">
+              <div class="summary-card" id="orderSummary">
+                <div id="summaryItems"></div>
+                <div class="summary-row" id="summaryShippingRow" style="display:none;">
+                  <span>Shipping</span><span id="summaryShipping">—</span>
+                </div>
+                <div class="summary-row total">
+                  <span>Total</span><span id="summaryTotal">—</span>
+                </div>
+                <div class="summary-note" id="summaryNote"></div>
+              </div>
 
               <div id="addressFields">
                 <div class="field-row">
@@ -206,19 +239,6 @@
                   <select id="addrCountry"></select>
                   <div class="hint">Used only to work out shipping — Europe €5, elsewhere $10, free over $100.</div>
                 </div>
-              </div>
-            </div>
-
-            <div class="order-side">
-              <div class="summary-card" id="orderSummary">
-                <div id="summaryItems"></div>
-                <div class="summary-row" id="summaryShippingRow" style="display:none;">
-                  <span>Shipping</span><span id="summaryShipping">—</span>
-                </div>
-                <div class="summary-row total">
-                  <span>Total</span><span id="summaryTotal">—</span>
-                </div>
-                <div class="summary-note" id="summaryNote"></div>
               </div>
 
               <button type="submit" class="submit" id="submitBtn">Place order</button>
@@ -295,17 +315,16 @@
         <button type="button" class="remove-item">Remove</button>
       </div>
       <div class="field">
+        <label class="f-title-label">Poster title</label>
+        <input type="text" class="f-title" placeholder="e.g. Jonas" maxlength="60" required>
+      </div>
+      <div class="field">
         <div class="file-picker">
           <input type="file" class="f-photo" accept="image/*" required>
           <span class="file-picker-btn">Upload image for constellation</span>
           <span class="file-picker-name">No file chosen</span>
         </div>
         <div class="hint">JPG or PNG, ideally a clear, well-lit subject.</div>
-      </div>
-      <div class="field-row">
-      <div class="field">
-        <label>Poster title</label>
-        <input type="text" class="f-title" placeholder="e.g. Jonas" maxlength="60" required>
       </div>
       <div class="field">
         <label>Hemisphere</label>
@@ -315,7 +334,6 @@
           <option value="Southern">Southern hemisphere</option>
         </select>
         <div class="hint f-hemisphere-hint">Whichever hemisphere you'll actually be standing under to find it.</div>
-      </div>
       </div>
       <div class="field">
         <label>Poster format</label>

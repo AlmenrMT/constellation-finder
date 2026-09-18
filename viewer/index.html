@@ -80,8 +80,25 @@
   .storyText p:last-child{ color:var(--muted); font-style:italic; }
   .artCards{ display:flex; gap:10px; overflow-x:auto; margin:10px 0 16px; padding-bottom:4px; }
   .artCard{ flex:0 0 auto; width:150px; }
-  .artCard img{ width:150px; height:150px; object-fit:cover; border-radius:8px; background:var(--panel); display:block; }
+  .artCard img{ width:150px; height:150px; object-fit:cover; border-radius:8px; background:var(--panel); display:block; cursor:pointer; }
   .artCard .cap{ font-size:10px; color:var(--muted); margin-top:4px; line-height:1.3; }
+
+  /* ---- full-screen art lightbox ---- */
+  #artLightbox{
+    position:fixed; inset:0; z-index:60; background:rgba(10,12,16,0.97);
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
+    padding:24px calc(24px + env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
+    padding-top:calc(24px + env(safe-area-inset-top));
+    cursor:zoom-out;
+  }
+  #artLightbox[hidden]{ display:none; }
+  #artLightbox img{ max-width:min(92vw,700px); max-height:78vh; object-fit:contain; border-radius:10px; box-shadow:0 6px 20px rgba(0,0,0,0.6); cursor:default; background:var(--panel); }
+  #artLightboxCap{ color:var(--text); font-size:14px; text-align:center; max-width:min(92vw,700px); }
+  #artLightboxClose{
+    position:absolute; top:calc(16px + env(safe-area-inset-top)); right:calc(16px + env(safe-area-inset-right));
+    background:var(--panel); border:1px solid var(--border); color:var(--text);
+    width:36px; height:36px; border-radius:50%; font-size:16px; line-height:1; cursor:pointer; padding:0;
+  }
   #infoPhoto{ margin:0 0 18px; }
   #infoPhoto img{ width:100%; max-width:260px; border-radius:10px; display:block; background:var(--panel); }
   #infoPhoto .cap{ font-size:11px; color:var(--muted); margin-top:6px; }
@@ -276,8 +293,32 @@
   </div>
 </div>
 
+<div id="artLightbox" hidden>
+  <button type="button" id="artLightboxClose" aria-label="Close">✕</button>
+  <img id="artLightboxImg" src="" alt="">
+  <div id="artLightboxCap"></div>
+</div>
+
 <script>
 (function(){
+  // ---------- full-screen art lightbox ----------
+  const artLightbox = document.getElementById('artLightbox');
+  const artLightboxImg = document.getElementById('artLightboxImg');
+  const artLightboxCap = document.getElementById('artLightboxCap');
+  function openArtLightbox(src, caption){
+    artLightboxImg.src = src;
+    artLightboxImg.alt = caption || '';
+    artLightboxCap.textContent = caption || '';
+    artLightbox.hidden = false;
+  }
+  function closeArtLightbox(){
+    artLightbox.hidden = true;
+    artLightboxImg.src = '';
+  }
+  document.getElementById('artLightboxClose').addEventListener('click', closeArtLightbox);
+  artLightbox.addEventListener('click', (e) => { if(e.target === artLightbox) closeArtLightbox(); });
+  document.addEventListener('keydown', (e) => { if(e.key === 'Escape' && !artLightbox.hidden) closeArtLightbox(); });
+
   // ---------- astronomy math (self-contained, same formulas as the Constellation Finder app) ----------
   function degToRad(d){ return d*Math.PI/180; }
   function radToDeg(r){ return r*180/Math.PI; }
@@ -791,6 +832,12 @@
         <div class="cap"><b>${escapeHtml(c)}</b><br>${escapeHtml(art.source)} · public domain</div>
       </div>
     `).join('')}</div>` : '';
+    // Full-screen on tap — attached after the fact rather than an inline
+    // handler, since this markup is rebuilt from scratch on every render.
+    artEl.querySelectorAll('.artCard').forEach((card, i) => {
+      const { c, art } = artEntries[i];
+      card.querySelector('img').addEventListener('click', () => openArtLightbox(art.url, `${c} — ${art.source} · public domain`));
+    });
 
     const namedField = nearbyNamedStars(NEARBY_DEG).slice(0, 8);
     const fieldEl = document.getElementById('infoFieldStars');
