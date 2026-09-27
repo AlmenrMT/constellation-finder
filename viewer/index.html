@@ -538,6 +538,38 @@
   arCanvas.addEventListener('pointercancel', endDrag);
   updateDragAffordance(!cameraActive);
 
+  // Arrow-key panning — a keyboard equivalent of the drag above, not a
+  // separate control: same heading/pitch state, same clamp-relative-to-
+  // target logic (maxPan), same !cameraActive gate. Attached to `document`
+  // rather than arCanvas since a <canvas> isn't natively focusable and has
+  // no tabindex here. Shift for a bigger step (a coarse jump vs. a nudge).
+  document.addEventListener('keydown', (e) => {
+    if(e.key !== 'ArrowUp' && e.key !== 'ArrowDown' && e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    if(cameraActive) return;
+    if(arScreen.style.display === 'none') return;
+    if(!artLightbox.hidden) return;
+    const active = document.activeElement;
+    if(active && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName)) return;
+
+    e.preventDefault();
+    const step = e.shiftKey ? fovH/4 : fovH/15;
+    const maxPan = fovH * 1.5;
+    const centerAz = targetAltAz ? targetAltAz.az : heading;
+    const centerAlt = targetAltAz ? targetAltAz.alt : pitch;
+
+    if(e.key === 'ArrowLeft' || e.key === 'ArrowRight'){
+      const dir = e.key === 'ArrowRight' ? 1 : -1;
+      const rawHeading = heading + dir*step;
+      const headingDiff = Math.max(-maxPan, Math.min(maxPan, angDiff(rawHeading, centerAz)));
+      heading = ((centerAz + headingDiff) % 360 + 360) % 360;
+    }else{
+      const dir = e.key === 'ArrowUp' ? 1 : -1;
+      const rawPitch = pitch + dir*step;
+      pitch = centerAlt + Math.max(-maxPan, Math.min(maxPan, rawPitch - centerAlt));
+    }
+    scheduleRender();
+  });
+
   // ---------- map file loading ----------
   function loadMapObject(obj, sourceLabel, baseUrl){
     map = obj;
