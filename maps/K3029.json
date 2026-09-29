@@ -2,7 +2,7 @@
   "schema": "constellation-map-v1",
   "id": "K3029",
   "name": "Nikolaj",
-  "generatedAt": "2026-09-29T16:50:57.022Z",
+  "generatedAt": "2026-09-29T17:15:56.048Z",
   "howToRender": {
     "summary": "Everything needed to redraw this chart and re-align \"drawing\" with the stars, independent of this app.",
     "starProjection": "Place star (ra,dec) at gnomonic(ra, dec, view.centerRa, view.centerDec) -> {x,y} tangent-plane units, then apply your own pan/zoom/scale to pixels.",
@@ -16,13 +16,13 @@
   },
   "projection": {
     "type": "gnomonic",
-    "tangentRa": 292.1764,
-    "tangentDec": 24.6649,
+    "tangentRa": 145.2876,
+    "tangentDec": 9.8923,
     "fit": {
-      "sRe": 1351.132421915539,
+      "sRe": 861.196565122664,
       "sIm": 0,
-      "tx": 281.8241834495714,
-      "ty": -387.43841979823816
+      "tx": 254.75409449541624,
+      "ty": -345.1539504277226
     }
   },
   "drawing": {
@@ -31,19 +31,19 @@
     "height": 576
   },
   "view": {
-    "centerRa": 293.83474545528986,
-    "centerDec": 25.5647,
-    "halfWidthDeg": 17.763010510382134,
-    "halfHeightDeg": 14.779438018665806
+    "centerRa": 145.92253183002276,
+    "centerDec": 8.629399999999999,
+    "halfWidthDeg": 23.932037002383503,
+    "halfHeightDeg": 23.145984134896228
   },
   "stars": [
     {
       "id": 0,
-      "name": "8 Cyg",
-      "constellation": "Cygnus",
-      "ra": 292.943,
-      "dec": 34.453,
-      "mag": 4.74,
+      "name": "Lam Leo",
+      "constellation": "Leo",
+      "ra": 142.9301,
+      "dec": 22.968,
+      "mag": 4.32,
       "inputPoint": {
         "x": 305.4563591022444,
         "y": 159.48129675810475,
@@ -52,11 +52,11 @@
     },
     {
       "id": 1,
-      "name": "9 Vul",
-      "constellation": "Vulpecula",
-      "ra": 293.6454,
-      "dec": 19.7734,
-      "mag": 5,
+      "name": "Iot Hya",
+      "constellation": "Hydra",
+      "ra": 144.964,
+      "dec": -1.1428,
+      "mag": 3.9,
       "inputPoint": {
         "x": 209.5525,
         "y": 477.5375,
@@ -65,11 +65,11 @@
     },
     {
       "id": 2,
-      "name": "1 Vul",
-      "constellation": "Vulpecula",
-      "ra": 289.0543,
-      "dec": 21.3904,
-      "mag": 4.76,
+      "name": "The Hya",
+      "constellation": "Hydra",
+      "ra": 138.5911,
+      "dec": 2.3143,
+      "mag": 3.89,
       "inputPoint": {
         "x": 384.4824120603015,
         "y": 458.4497487437186,
@@ -78,11 +78,11 @@
     },
     {
       "id": 3,
-      "name": "Zet Sge",
-      "constellation": "Sagitta",
-      "ra": 297.2444,
-      "dec": 19.142,
-      "mag": 5.01,
+      "name": "Alp Sex",
+      "constellation": "Sextans",
+      "ra": 151.9845,
+      "dec": -0.3716,
+      "mag": 4.48,
       "inputPoint": {
         "x": 142.5753768844221,
         "y": 537.4773869346734,
@@ -91,11 +91,11 @@
     },
     {
       "id": 4,
-      "name": "Nu-2 Lyr",
-      "constellation": "Lyra",
-      "ra": 282.4705,
-      "dec": 32.5511,
-      "mag": 5.22,
+      "name": "Del Cnc",
+      "constellation": "Cancer",
+      "ra": 131.1712,
+      "dec": 18.1543,
+      "mag": 3.94,
       "inputPoint": {
         "x": 472.4760705289672,
         "y": 209.52896725440806,
@@ -104,11 +104,11 @@
     },
     {
       "id": 5,
-      "name": "15 Vul",
-      "constellation": "Vulpecula",
-      "ra": 300.2752,
-      "dec": 27.7536,
-      "mag": 4.66,
+      "name": "37 Leo",
+      "constellation": "Leo",
+      "ra": 154.1697,
+      "dec": 13.7283,
+      "mag": 5.42,
       "inputPoint": {
         "x": 110.53787878787878,
         "y": 274.5378787878788,
@@ -117,11 +117,11 @@
     },
     {
       "id": 6,
-      "name": "Eta Sge",
-      "constellation": "Sagitta",
-      "ra": 301.2896,
-      "dec": 19.9911,
-      "mag": 5.09,
+      "name": "Bet Sex",
+      "constellation": "Sextans",
+      "ra": 157.5728,
+      "dec": -0.637,
+      "mag": 5.08,
       "inputPoint": {
         "x": 84.52852852852853,
         "y": 497.4864864864865,
@@ -130,11 +130,11 @@
     },
     {
       "id": 7,
-      "name": "9 Cyg",
-      "constellation": "Cygnus",
-      "ra": 293.7122,
-      "dec": 29.463,
-      "mag": 5.39,
+      "name": "Psi Leo",
+      "constellation": "Leo",
+      "ra": 145.9329,
+      "dec": 14.0217,
+      "mag": 5.36,
       "inputPoint": {
         "x": 242.5,
         "y": 289.5,
@@ -178,19 +178,13 @@
     "label": "Edit to your own location — see obsLat/obsLon in the app"
   },
   "match": {
-    "constellationsUsed": "Cygnus, Vulpecula, Sagitta, Lyra",
-    "accuracyResidual": 0.02842468444342692,
-    "intensityResidual": 0.18387443651401697,
-    "combinedScore": 0.1203619027004354,
+    "constellationsUsed": "Leo, Hydra, Sextans, Cancer",
+    "accuracyResidual": 0.0264934325544494,
+    "intensityResidual": 0.22843109969536962,
+    "combinedScore": 0.1407089824021342,
     "intensityWeight": 0.5
   },
   "otherCandidates": [
-    {
-      "constellationsUsed": "Leo, Hydra, Sextans, Cancer",
-      "combinedScore": 0.1407089824021342,
-      "accuracyResidual": 0.0264934325544494,
-      "intensityResidual": 0.22843109969536962
-    },
     {
       "constellationsUsed": "Pisces, Andromeda, Aries, Cetus",
       "combinedScore": 0.14169154849681548,
@@ -238,6 +232,12 @@
       "combinedScore": 0.1619605791776012,
       "accuracyResidual": 0.03283448928936379,
       "intensityResidual": 0.25825217977647486
+    },
+    {
+      "constellationsUsed": "Ursa Minor, Draco, Cepheus",
+      "combinedScore": 0.1623777926489024,
+      "accuracyResidual": 0.03038106772298861,
+      "intensityResidual": 0.26399344985182754
     }
   ],
   "description": "Nikolaj is drawn from 8 real stars — 9 Lac, Kap And, Iot And, 5 Lac, 6 Lac, Lam Cep, Sig Cas and 1 Cas. Most belong to Lacerta, with the rest borrowed from Andromeda, Cassiopeia, Cepheus. Lacerta is modest by design, fitting neatly into whatever space is available rather than demanding more.\n\nNo constellation rises alone. Lacerta shares this stretch of sky with Andromeda, which is steady under pressure — the kind that endures a difficult situation it didn't choose, and comes through changed but intact. Doesn't dwell on it, but it shows, quietly, as resilience., and Nikolaj sits right where the two overlap — carrying a little of both, the way a person can take after more than one side of the family.",
