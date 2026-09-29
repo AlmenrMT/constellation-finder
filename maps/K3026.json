@@ -2,7 +2,7 @@
   "schema": "constellation-map-v1",
   "id": "K3026",
   "name": "Sarah and Kristian",
-  "generatedAt": "2026-09-29T17:19:38.613Z",
+  "generatedAt": "2026-09-29T19:08:01.276Z",
   "howToRender": {
     "summary": "Everything needed to redraw this chart and re-align \"drawing\" with the stars, independent of this app.",
     "starProjection": "Place star (ra,dec) at gnomonic(ra, dec, view.centerRa, view.centerDec) -> {x,y} tangent-plane units, then apply your own pan/zoom/scale to pixels.",
@@ -16,13 +16,13 @@
   },
   "projection": {
     "type": "gnomonic",
-    "tangentRa": 202.9912,
-    "tangentDec": -6.2558,
+    "tangentRa": 90.864,
+    "tangentDec": 19.6906,
     "fit": {
-      "sRe": 870.9606756397044,
+      "sRe": 1271.0077211445014,
       "sIm": 0,
-      "tx": 285.872316553922,
-      "ty": -181.06386449652064
+      "tx": 324.0440339273009,
+      "ty": -194.29676412507933
     }
   },
   "drawing": {
@@ -31,19 +31,19 @@
     "height": 427
   },
   "view": {
-    "centerRa": 202.44973705406576,
-    "centerDec": -8.661125,
-    "halfWidthDeg": 22.682036017651416,
-    "halfHeightDeg": 17.617361391625135
+    "centerRa": 92.34245430312853,
+    "centerDec": 18.4531375,
+    "halfWidthDeg": 15.648160245689915,
+    "halfHeightDeg": 14.337161786882819
   },
   "stars": [
     {
       "id": 0,
-      "name": "Eta Crv",
-      "constellation": "Corvus",
-      "ra": 188.0176,
-      "dec": -16.196,
-      "mag": 4.3,
+      "name": "Lam Ori",
+      "constellation": "Orion",
+      "ra": 83.7845,
+      "dec": 9.9342,
+      "mag": 3.39,
       "inputPoint": {
         "x": 520.497512437811,
         "y": 357.44278606965173,
@@ -52,11 +52,11 @@
     },
     {
       "id": 1,
-      "name": "Chi Vir",
-      "constellation": "Virgo",
-      "ra": 189.8115,
-      "dec": -7.9956,
-      "mag": 4.66,
+      "name": "Zet Tau",
+      "constellation": "Taurus",
+      "ra": 84.4112,
+      "dec": 21.1425,
+      "mag": 2.97,
       "inputPoint": {
         "x": 468.58,
         "y": 186.5375,
@@ -65,11 +65,11 @@
     },
     {
       "id": 2,
-      "name": "90 Vir",
-      "constellation": "Virgo",
-      "ra": 208.6756,
-      "dec": -1.5031,
-      "mag": 5.16,
+      "name": "Mu Gem",
+      "constellation": "Gemini",
+      "ra": 95.7401,
+      "dec": 22.5136,
+      "mag": 2.87,
       "inputPoint": {
         "x": 178.5429292929293,
         "y": 110.5,
@@ -78,11 +78,11 @@
     },
     {
       "id": 3,
-      "name": "Tau Vir",
-      "constellation": "Virgo",
-      "ra": 210.4116,
-      "dec": 1.5445,
-      "mag": 4.23,
+      "name": "Eps Gem",
+      "constellation": "Gemini",
+      "ra": 100.983,
+      "dec": 25.1311,
+      "mag": 3.06,
       "inputPoint": {
         "x": 150.47341772151898,
         "y": 57.51139240506329,
@@ -91,11 +91,11 @@
     },
     {
       "id": 4,
-      "name": "The Vir",
-      "constellation": "Virgo",
-      "ra": 197.4875,
-      "dec": -5.539,
-      "mag": 4.38,
+      "name": "Chi-1 Ori",
+      "constellation": "Orion",
+      "ra": 88.5958,
+      "dec": 20.2762,
+      "mag": 4.39,
       "inputPoint": {
         "x": 364.4730878186969,
         "y": 197.53257790368272,
@@ -104,11 +104,11 @@
     },
     {
       "id": 5,
-      "name": "86 Vir",
-      "constellation": "Virgo",
-      "ra": 206.4847,
-      "dec": -12.4265,
-      "mag": 5.5,
+      "name": "72 Ori",
+      "constellation": "Orion",
+      "ra": 93.8547,
+      "dec": 16.1432,
+      "mag": 5.34,
       "inputPoint": {
         "x": 251.5,
         "y": 276.5,
@@ -117,11 +117,11 @@
     },
     {
       "id": 6,
-      "name": "95 Vir",
-      "constellation": "Virgo",
-      "ra": 211.6784,
-      "dec": -9.3135,
-      "mag": 5.46,
+      "name": "Nu Gem",
+      "constellation": "Gemini",
+      "ra": 97.2408,
+      "dec": 20.2121,
+      "mag": 4.13,
       "inputPoint": {
         "x": 165.5,
         "y": 202.5503875968992,
@@ -130,11 +130,11 @@
     },
     {
       "id": 7,
-      "name": "87 Vir",
-      "constellation": "Virgo",
-      "ra": 206.8558,
-      "dec": -17.8598,
-      "mag": 5.41,
+      "name": "74 Ori",
+      "constellation": "Orion",
+      "ra": 94.1109,
+      "dec": 12.2722,
+      "mag": 5.04,
       "inputPoint": {
         "x": 257.5,
         "y": 370.5,
@@ -178,19 +178,13 @@
     "label": "Edit to your own location — see obsLat/obsLon in the app"
   },
   "match": {
-    "constellationsUsed": "Corvus, Virgo",
-    "accuracyResidual": 0.022008533248107736,
-    "intensityResidual": 0.17012991319467602,
-    "combinedScore": 0.10707348984544575,
+    "constellationsUsed": "Orion, Taurus, Gemini",
+    "accuracyResidual": 0.04642789717382807,
+    "intensityResidual": 0.12405910126734165,
+    "combinedScore": 0.1084574478074989,
     "intensityWeight": 0.5
   },
   "otherCandidates": [
-    {
-      "constellationsUsed": "Orion, Taurus, Gemini",
-      "combinedScore": 0.1084574478074989,
-      "accuracyResidual": 0.04642789717382807,
-      "intensityResidual": 0.12405910126734165
-    },
     {
       "constellationsUsed": "Hercules, Draco",
       "combinedScore": 0.12157148101943874,
@@ -238,6 +232,12 @@
       "combinedScore": 0.1355739995602251,
       "accuracyResidual": 0.04625871803380927,
       "intensityResidual": 0.17863056305283165
+    },
+    {
+      "constellationsUsed": "Ophiuchus, Hercules, Vulpecula, Cygnus, Aquila",
+      "combinedScore": 0.13904292528406625,
+      "accuracyResidual": 0.015549907177662536,
+      "intensityResidual": 0.24698603621280746
     }
   ],
   "description": "Sarah and Kristian is drawn from 8 real stars — 2 Cyg, 16 Vul, 1 Vul, 39 Cyg, Alp Vul, Eta Sge, 4 Vul and 10 Vul. Most belong to Vulpecula, with the rest borrowed from Cygnus, Sagitta. Vulpecula is modest and a little scrappy, comfortable staying low-key even when something genuinely notable sits quietly within it.\n\nBorders in the sky are older than any drawn on Earth, and Vulpecula has always kept close company with Cygnus — capable of real reinvention, and makes the change look graceful rather than difficult.. Sarah and Kristian carries proof of that friendship in its own shape: a star on loan, a little of Cygnus's influence woven into Vulpecula's outline.",
