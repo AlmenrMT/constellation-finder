@@ -184,7 +184,6 @@
 
       <div class="showcase-main">
         <h2>Order your poster</h2>
-        <p class="section-lead">One order can include more than one constellation — add another if you're doing one per family member. We'll email you to confirm and arrange payment before we start.</p>
 
         <form class="order" id="orderForm" novalidate>
           <div class="order-grid">
@@ -331,7 +330,6 @@
           <option value="Northern">Northern hemisphere</option>
           <option value="Southern">Southern hemisphere</option>
         </select>
-        <div class="hint f-hemisphere-hint">Whichever hemisphere you'll actually be standing under to find it.</div>
       </div>
       <div class="field">
         <label>Poster format</label>
@@ -450,8 +448,6 @@
     const sel = block.querySelector('.f-hemisphere');
     if(sel.dataset.userChanged || sel.value) return;
     sel.value = geoHemisphere;
-    block.querySelector('.f-hemisphere-hint').textContent =
-      'Guessed from your location — change it if that\'s not where you\'ll actually be standing.';
   }
 
   function refreshItemChrome(){
