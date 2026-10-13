@@ -133,6 +133,7 @@
       <div class="tabs">
         <button type="button" class="tab-btn active" data-tab="orders">Orders</button>
         <button type="button" class="tab-btn" data-tab="bookkeeping">Bookkeeping</button>
+        <button type="button" class="tab-btn" data-tab="settings">Settings</button>
         <button type="button" class="tab-btn" data-tab="faq">FAQ</button>
       </div>
     </div>
@@ -150,6 +151,16 @@
       <button id="clearAllBtn" class="danger">Clear all test data</button>
     </div>
     <div id="orderList"></div>
+  </div>
+
+  <div id="settingsTab" class="tab-panel" style="display:none;">
+    <p class="lead">Business settings. Changes save automatically when you leave the field.</p>
+    <div class="faq-admin-item" style="max-width:420px;">
+      <label>Gelato product markup (%)</label>
+      <input type="number" id="gelatoMarkupInput" step="1" min="0">
+      <div style="font-size:12px; color:var(--muted); margin-top:-4px;">Your product price = Gelato's print cost + this percentage (100 = double Gelato's cost). Shipping is handled separately.</div>
+      <span class="save-hint" id="settingsSaveHint" style="margin-left:0;">Saved ✓</span>
+    </div>
   </div>
 
   <div id="faqTab" class="tab-panel" style="display:none;">
@@ -501,9 +512,32 @@
       ordersTab.style.display = tab === 'orders' ? 'block' : 'none';
       faqTab.style.display = tab === 'faq' ? 'block' : 'none';
       bookkeepingTab.style.display = tab === 'bookkeeping' ? 'block' : 'none';
+      settingsTab.style.display = tab === 'settings' ? 'block' : 'none';
       if(tab === 'faq' && !faqsLoaded){ faqsLoaded = true; loadFaqs(); }
       if(tab === 'bookkeeping') loadBookkeeping();
+      if(tab === 'settings') loadSettings();
     });
+  });
+
+  // ---------- settings (key/value table; see the add_settings_table migration) ----------
+  const settingsTab = document.getElementById('settingsTab');
+  const gelatoMarkupInput = document.getElementById('gelatoMarkupInput');
+  const settingsSaveHint = document.getElementById('settingsSaveHint');
+
+  async function loadSettings(){
+    const { data, error } = await supabase.from('settings').select('value').eq('key', 'gelato_markup_percent').maybeSingle();
+    if(error){ alert('Could not load settings: ' + error.message); return; }
+    gelatoMarkupInput.value = data ? Number(data.value) : 100;
+  }
+
+  gelatoMarkupInput.addEventListener('blur', async () => {
+    const pct = parseFloat(gelatoMarkupInput.value);
+    if(!Number.isFinite(pct) || pct < 0){ alert('Enter a markup of 0 or more.'); loadSettings(); return; }
+    const { error } = await supabase.from('settings')
+      .upsert({ key: 'gelato_markup_percent', value: pct, updated_at: new Date().toISOString() });
+    if(error){ alert('Could not save: ' + error.message); return; }
+    settingsSaveHint.classList.add('show');
+    setTimeout(() => settingsSaveHint.classList.remove('show'), 1200);
   });
 
   // ---------- bookkeeping (income from paid orders, manually-logged expenses) ----------
